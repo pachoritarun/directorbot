@@ -268,22 +268,27 @@ Current Context Available:
 - Today's Itinerary/Schedules: ${JSON.stringify(context.schedules || [])}
 - Recent WhatsApp Messages from Director's phone: ${JSON.stringify(context.whatsappMessages || [])}
 - Recent Important Emails: ${JSON.stringify(context.recentEmails || [])}
+- Emails Found via Live Gmail Search (Read & Unread): ${JSON.stringify(context.matchedEmails || [])}
 - Pending Email Drafts: ${JSON.stringify(context.pendingDrafts || [])}
 
 Director's Message / Query: "${query}"
 
 Instructions:
-1. If the Director is asking about a person (e.g., "Tarun ne kya text kiya?"), check the WhatsApp messages or emails and give an exact, concise summary.
-2. If asking about schedule/meetings, present the timings clearly.
-3. If the Director wants to reply to someone on WhatsApp (e.g. "Reply to Tarun: meet me at 4 PM"):
+1. If the Director asks to find or check emails regarding a person, entity, or topic (e.g. "IIT Bombay", "Techfest", etc.):
+   - First check "Emails Found via Live Gmail Search" and "Recent Important Emails".
+   - If any emails are present (even if marked read in Gmail), present them immediately: Sender Name/Email, Subject, Date, and Key Snippet/Summary.
+   - If no emails are found in their personal inbox, state that no emails were found in their Gmail account, and then provide the official verified contact details (e.g. director@iitb.ac.in).
+2. If the Director is asking about a person (e.g., "Tarun ne kya text kiya?"), check WhatsApp messages and give a concise summary.
+3. If asking about schedule/meetings, present the timings clearly.
+4. If the Director wants to reply to someone on WhatsApp (e.g. "Reply to Tarun: meet me at 4 PM"):
    Recognize the intent and specify an action block:
    [ACTION:WHATSAPP_REPLY | TO:recipient_name_or_phone | MESSAGE:reply_content]
-4. If the Director wants to send an email (e.g. "Tarun ko email bhej do..."):
+5. If the Director wants to send an email (e.g. "Tarun ko email bhej do..."):
    NEVER say the email is already sent! Prepare the draft and tell the Director:
    "I have drafted the email. Please review the details below. Reply 'CONFIRM' to send or 'CANCEL' to discard."
    And include an action block:
    [ACTION:DRAFT_EMAIL | TO:recipient | SUBJECT:subject | BODY:body_content]
-5. For general queries, answer directly with executive clarity.
+6. For general queries, answer directly with executive clarity.
 `;
 
     const response = await callGeminiWithFallback(client, {

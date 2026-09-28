@@ -10,7 +10,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { query, getSetting, logActivity } from '../database/db.js';
 import { handleDirectorChat, draftExecutiveEmail, analyzeEmails, summarizeWhatsAppChats, getEdTechAndAiNews } from '../services/geminiService.js';
-import { fetchUnreadEmails, sendVerifiedEmail } from '../services/gmailService.js';
+import { fetchUnreadEmails, sendVerifiedEmail, searchGmail } from '../services/gmailService.js';
 import { getSchedulesByDate, parseScheduleFromText } from '../services/scheduleService.js';
 import { generateExecutiveBriefingPdf } from '../services/pdfService.js';
 
@@ -337,10 +337,52 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       `SELECT * FROM email_drafts WHERE status = 'PENDING_VERIFICATION' LIMIT 1`
     );
 
+    // Live search Gmail if user query inquires about emails or specific entities (e.g. IIT Bombay, Techfest, etc.)
+    let matchedEmails = [];
+    const lowerText = text.toLowerCase();
+    const isEmailSearch = lowerText.includes('email') || 
+                          lowerText.includes('mail') || 
+                          lowerText.includes('find') || 
+                          lowerText.includes('search') ||
+                          lowerText.includes('check') ||
+                          lowerText.includes('iit') ||
+                          lowerText.includes('techfest');
+
+    if (isEmailSearch) {
+      const keyword = text
+        .replace(/find|search|check|look for|show me|give me|the email of|email from|mail of|mail from|email|mail|emails|mails|bheja|aaya|kya|hai|se|ko|ka|ki|ke|please|plz/gi, '')
+        .replace(/[?!,.]/g, '')
+        .trim();
+
+      const queryTerm = keyword.length > 1 ? keyword : text;
+      console.log(`[Director Query] Searching live Gmail inbox for: "${queryTerm}"...`);
+      
+      try {
+        const liveFound = await searchGmail(queryTerm, 10);
+        if (liveFound && liveFound.length > 0) {
+          matchedEmails.push(...liveFound);
+          // Auto-index into MySQL cache so it is permanently remembered
+          for (const em of liveFound) {
+            try {
+              await query(
+                `INSERT INTO email_summaries (gmail_id, sender_email, sender_name, subject, snippet, date_received, priority, summary, action_required)
+                 VALUES (?, ?, ?, ?, ?, ?, 'Normal', ?, 'Informational')
+                 ON DUPLICATE KEY UPDATE summary = VALUES(summary)`,
+                [em.id, em.senderEmail, em.senderName, em.subject, em.snippet, em.date || '', em.snippet]
+              );
+            } catch(e) {}
+          }
+        }
+      } catch (searchErr) {
+        console.warn('[Director Query] Gmail search failed:', searchErr.message);
+      }
+    }
+
     const aiReply = await handleDirectorChat(text, {
       schedules,
       whatsappMessages: recentChats,
       recentEmails,
+      matchedEmails,
       pendingDrafts
     });
 

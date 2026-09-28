@@ -108,32 +108,76 @@ export async function getAuthenticatedGmail() {
 }
 
 /**
- * Fetches recent unread emails from Director's inbox
+ * Fetches recent emails from Director's inbox (both unread and recently read)
  */
-export async function fetchUnreadEmails(limit = 10) {
+export async function fetchUnreadEmails(limit = 15, unreadOnly = false) {
   const gmail = await getAuthenticatedGmail();
   if (!gmail) {
     return [];
   }
 
   try {
+    const queryFilter = unreadOnly 
+      ? 'is:unread -category:promotions -category:social' 
+      : '-category:promotions -category:social';
+
     const listRes = await gmail.users.messages.list({
       userId: 'me',
-      q: 'is:unread -category:promotions -category:social',
+      q: queryFilter,
       maxResults: limit
     });
 
     const messages = listRes.data.messages || [];
-    const parsedEmails = [];
+    return await parseGmailMessageList(gmail, messages);
+  } catch (error) {
+    console.error('[Gmail Service] Failed to fetch emails:', error.message);
+    logActivity('GMAIL', `Failed to fetch emails: ${error.message}`, 'ERROR');
+    return [];
+  }
+}
 
-    for (const msg of messages) {
+/**
+ * Searches Gmail directly with a keyword query across ALL messages (read and unread)
+ */
+export async function searchGmail(searchQuery, limit = 10) {
+  const gmail = await getAuthenticatedGmail();
+  if (!gmail || !searchQuery) {
+    return [];
+  }
+
+  try {
+    console.log(`[Gmail API] Searching inbox for: "${searchQuery}"...`);
+    const listRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: searchQuery,
+      maxResults: limit
+    });
+
+    const messages = listRes.data.messages || [];
+    const results = await parseGmailMessageList(gmail, messages);
+    console.log(`[Gmail API] Search for "${searchQuery}" returned ${results.length} email(s)`);
+    return results;
+  } catch (error) {
+    console.error('[Gmail Service] Search error:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Helper to fetch full details for a list of Gmail message IDs
+ */
+async function parseGmailMessageList(gmail, messages) {
+  const parsedEmails = [];
+
+  for (const msg of messages) {
+    try {
       const details = await gmail.users.messages.get({
         userId: 'me',
         id: msg.id,
         format: 'full'
       });
 
-      const headers = details.data.payload.headers || [];
+      const headers = details.data.payload?.headers || [];
       const getHeader = (name) => {
         const found = headers.find(h => h.name.toLowerCase() === name.toLowerCase());
         return found ? found.value : '';
@@ -163,14 +207,12 @@ export async function fetchUnreadEmails(limit = 10) {
         snippet,
         date
       });
+    } catch (e) {
+      console.warn(`[Gmail Service] Could not fetch message ${msg.id}:`, e.message);
     }
-
-    return parsedEmails;
-  } catch (error) {
-    console.error('[Gmail Service] Failed to fetch emails:', error.message);
-    logActivity('GMAIL', `Failed to fetch emails: ${error.message}`, 'ERROR');
-    return [];
   }
+
+  return parsedEmails;
 }
 
 /**

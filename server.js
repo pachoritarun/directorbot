@@ -216,7 +216,7 @@ app.get('/api/emails', async (req, res) => {
 
 app.post('/api/emails/sync', async (req, res) => {
   try {
-    const raw = await fetchUnreadEmails(10);
+    const raw = await fetchUnreadEmails(20, false);
     const analyzed = await analyzeEmails(raw);
 
     for (const em of analyzed) {
