@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { query, getSetting, logActivity } from '../database/db.js';
 import { handleDirectorChat, draftExecutiveEmail, analyzeEmails, summarizeWhatsAppChats, getEdTechAndAiNews } from '../services/geminiService.js';
 import { fetchUnreadEmails, sendVerifiedEmail, searchGmail } from '../services/gmailService.js';
-import { getSchedulesByDate, parseScheduleFromText, parseScheduleIntentWithAI, addSchedule } from '../services/scheduleService.js';
+import { getSchedulesByDate, parseScheduleFromText, parseScheduleIntentWithAI, addSchedule, getUpcomingSchedules } from '../services/scheduleService.js';
 import { generateExecutiveBriefingPdf } from '../services/pdfService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -355,9 +355,9 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     }
 
     // --- Natural AI Conversation with Context ---
-    // 1. Gather Context
+    // 1. Gather Context (Both today and upcoming schedules)
     const todayStr = new Date().toISOString().split('T')[0];
-    const schedules = await getSchedulesByDate(todayStr);
+    const schedules = await getUpcomingSchedules();
 
     const recentChats = await query(
       `SELECT sender_name, sender_phone, message_text, timestamp FROM whatsapp_chats 
@@ -373,33 +373,54 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       `SELECT * FROM email_drafts WHERE status = 'PENDING_VERIFICATION' LIMIT 1`
     );
 
-    // Live search Gmail if user query inquires about emails or specific entities (e.g. IIT Bombay, Techfest, etc.)
+    // Live search Gmail if user query inquires about emails, people, or entities
     let matchedEmails = [];
     const lowerText = text.toLowerCase();
     const isEmailSearch = lowerText.includes('email') || 
                           lowerText.includes('mail') || 
                           lowerText.includes('find') || 
-                          lowerText.includes('search') ||
-                          lowerText.includes('check') ||
-                          lowerText.includes('iit') ||
-                          lowerText.includes('techfest') ||
-                          lowerText.includes('bombay') ||
-                          lowerText.includes('workshop');
+                          lowerText.includes('search') || 
+                          lowerText.includes('check') || 
+                          lowerText.includes('iit') || 
+                          lowerText.includes('techfest') || 
+                          lowerText.includes('bombay') || 
+                          lowerText.includes('dheemant') || 
+                          lowerText.includes('workshop') ||
+                          lowerText.includes('@') ||
+                          lowerText.includes('.com') ||
+                          lowerText.includes('.edu');
 
     if (isEmailSearch) {
-      // Clean query by removing common stop/filler words and time modifiers
-      const stopWords = /\b(find|search|check|look for|show me|give me|get me|the|email|mail|emails|mails|inbox|gmail|latest|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant)\b/gi;
-      const cleanKeyword = text
-        .replace(stopWords, ' ')
-        .replace(/[?!,.:;"'()[\]{}<>*#~]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      // 1. Check if user typed an explicit email address (e.g. Amitdheemant@jecrcu.edu.in)
+      const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
+      const emailMatch = text.match(emailRegex);
 
-      const queryTerm = cleanKeyword.length > 1 ? cleanKeyword : text;
+      let queryTerm = '';
+      if (emailMatch) {
+        const addr = emailMatch[1].toLowerCase();
+        queryTerm = `from:${addr} OR to:${addr} OR "${addr}"`;
+      } else {
+        // 2. Check if user is asking for emails from a specific person
+        const fromMatch = lowerText.match(/(?:from|sent by|bheja|send)\s+([a-zA-Z0-9_-]+)/i);
+        if (fromMatch && fromMatch[1] && fromMatch[1].length > 2) {
+          const person = fromMatch[1].trim();
+          queryTerm = `from:${person} OR "${person}"`;
+        } else {
+          // 3. Clean keywords (remove stop/filler words while preserving dots and hyphens)
+          const stopWords = /\b(find|search|check|look for|show me|give me|get me|the|email|mail|emails|mails|inbox|gmail|latest|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
+          const cleanKeyword = text
+            .replace(stopWords, ' ')
+            .replace(/[?!,;'"()[\]{}<>*#~]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          queryTerm = cleanKeyword.length > 1 ? cleanKeyword : text;
+        }
+      }
+
       console.log(`[Director Query] Searching live Gmail inbox for: "${queryTerm}"...`);
       
       try {
-        const liveFound = await searchGmail(queryTerm, 10);
+        const liveFound = await searchGmail(queryTerm, 20);
         if (liveFound && liveFound.length > 0) {
           matchedEmails.push(...liveFound);
           // Auto-index into MySQL cache so it is permanently remembered
