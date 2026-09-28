@@ -1,0 +1,586 @@
+// Socket.io Connection
+const socket = io();
+
+// State
+let currentStatus = {
+  database: {},
+  whatsapp: { director: {}, bot: {} },
+  gmail: {},
+  gemini: {}
+};
+
+// Initialize on DOM load
+document.addEventListener('DOMContentLoaded', () => {
+  setupNavigation();
+  setupSocketListeners();
+  loadAllData();
+  setupSettingsForm();
+  setupScheduleForm();
+  checkUrlParams();
+
+  // Set today's date in header
+  const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+  const todayStr = new Date().toLocaleDateString('en-US', options);
+  document.getElementById('current-date-display').textContent = `Today: ${todayStr}`;
+
+  // Periodic Refresh
+  setInterval(loadStats, 10000);
+  setInterval(loadSchedules, 15000);
+  setInterval(loadActivityLogs, 8000);
+});
+
+// Tab Navigation
+function setupNavigation() {
+  const menuButtons = document.querySelectorAll('.menu-item');
+  menuButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.getAttribute('data-tab');
+      switchTab(tabId);
+    });
+  });
+
+  // Top action buttons
+  document.getElementById('btn-sync-emails')?.addEventListener('click', forceSyncEmails);
+  document.getElementById('btn-trigger-briefing')?.addEventListener('click', generateAndSendBriefingNow);
+}
+
+function switchTab(tabId) {
+  document.querySelectorAll('.menu-item').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+  const activeBtn = document.querySelector(`.menu-item[data-tab="${tabId}"]`);
+  const activeContent = document.getElementById(tabId);
+
+  if (activeBtn) activeBtn.classList.add('active');
+  if (activeContent) activeContent.classList.add('active');
+
+  // Trigger tab-specific refresh
+  if (tabId === 'tab-gmail') loadEmails();
+  if (tabId === 'tab-drafts') loadDrafts();
+  if (tabId === 'tab-schedule') loadSchedules();
+  if (tabId === 'tab-whatsapp-chats') loadWhatsAppChats();
+  if (tabId === 'tab-briefings') loadLatestBriefing();
+  if (tabId === 'tab-settings') loadSettings();
+}
+
+// Socket.io Listeners for Real-time QR and Status
+function setupSocketListeners() {
+  socket.on('connect', () => {
+    console.log('[Socket] Connected to backend');
+  });
+
+  socket.on('status_update', (data) => {
+    updateWhatsAppUI(data);
+  });
+}
+
+function updateWhatsAppUI(waData) {
+  if (!waData) return;
+
+  const dirStatusPill = document.getElementById('dir-status-pill');
+  const botStatusPill = document.getElementById('bot-status-pill');
+  const dirStatusText = document.getElementById('director-session-status');
+  const botStatusText = document.getElementById('bot-session-status');
+  const dirQRContainer = document.getElementById('director-qr-container');
+  const botQRContainer = document.getElementById('bot-qr-container');
+
+  // 1. Director Session
+  if (waData.director) {
+    const status = waData.director.status;
+    dirStatusPill.textContent = status;
+    dirStatusText.textContent = `Status: ${status}`;
+
+    if (status === 'CONNECTED') {
+      dirStatusPill.className = 'status-indicator-pill connected';
+      dirQRContainer.innerHTML = `
+        <div style="text-align:center; color: #10b981;">
+          <svg width="60" height="60" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <h4 style="margin-top:10px;">Connected & Active</h4>
+          <p style="font-size:0.75rem; color:#64748b;">Silent Monitor Ingesting Messages</p>
+        </div>`;
+    } else if (status === 'SCAN_QR' && waData.director.qr) {
+      dirStatusPill.className = 'status-indicator-pill action-needed';
+      dirQRContainer.innerHTML = `<img src="${waData.director.qr}" alt="Director WhatsApp QR">`;
+    }
+  }
+
+  // 2. Bot Session
+  if (waData.bot) {
+    const status = waData.bot.status;
+    botStatusPill.textContent = status;
+    botStatusText.textContent = `Status: ${status}`;
+
+    if (status === 'CONNECTED') {
+      botStatusPill.className = 'status-indicator-pill connected';
+      botQRContainer.innerHTML = `
+        <div style="text-align:center; color: #06b6d4;">
+          <svg width="60" height="60" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <h4 style="margin-top:10px;">Executive Bot Active</h4>
+          <p style="font-size:0.75rem; color:#64748b;">Ready to serve Director & PA</p>
+        </div>`;
+    } else if (status === 'SCAN_QR' && waData.bot.qr) {
+      botStatusPill.className = 'status-indicator-pill action-needed';
+      botQRContainer.innerHTML = `<img src="${waData.bot.qr}" alt="Bot WhatsApp QR">`;
+    }
+  }
+}
+
+// Data Fetching
+async function loadAllData() {
+  await loadStatus();
+  await loadStats();
+  await loadSchedules();
+  await loadActivityLogs();
+  await loadDrafts();
+}
+
+async function loadStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    currentStatus = data;
+
+    // Database Status
+    const dbOnline = data.database?.connected;
+    document.getElementById('dot-db').className = dbOnline ? 'dot-online' : 'dot-online text-danger';
+    document.getElementById('db-desc').textContent = dbOnline ? `${data.database.database} (Active)` : 'Offline / Error';
+
+    // Gemini Status
+    const geminiConfigured = data.gemini?.configured;
+    document.getElementById('dot-gemini').className = geminiConfigured ? 'dot-online' : 'dot-online text-warning';
+    document.getElementById('gemini-desc').textContent = geminiConfigured ? 'Gemini 2.5 Active' : 'Key Needed';
+
+    // Gmail Status
+    const gmailConnected = data.gmail?.connected;
+    const gmailPill = document.getElementById('gmail-status-pill');
+    const gmailText = document.getElementById('gmail-status-text');
+    const gmailAddress = document.getElementById('gmail-connected-address');
+    const gmailSub = document.getElementById('gmail-connected-sub');
+
+    if (gmailConnected) {
+      gmailPill.textContent = 'CONNECTED';
+      gmailPill.className = 'status-indicator-pill connected';
+      gmailText.textContent = `Connected: ${data.gmail.email}`;
+      if (gmailAddress) gmailAddress.textContent = data.gmail.email;
+      if (gmailSub) gmailSub.textContent = `Last synchronized: ${new Date(data.gmail.lastSync).toLocaleTimeString()}`;
+      document.getElementById('btn-connect-gmail').style.display = 'none';
+    } else {
+      gmailPill.textContent = 'DISCONNECTED';
+      gmailPill.className = 'status-indicator-pill action-needed';
+      gmailText.textContent = 'Click "Connect with Google" to link Director\'s Gmail';
+      if (gmailAddress) gmailAddress.textContent = 'No Gmail Connected';
+      if (gmailSub) gmailSub.textContent = 'Authorize Director inbox to enable automatic email intelligence.';
+    }
+
+    // WhatsApp Status
+    if (data.whatsapp) {
+      updateWhatsAppUI(data.whatsapp);
+    }
+  } catch (err) {
+    console.error('Failed to load status:', err);
+  }
+}
+
+async function loadStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const stats = await res.json();
+
+    document.getElementById('stat-emails-today').textContent = stats.emailsToday || 0;
+    document.getElementById('stat-chats-today').textContent = stats.chatsToday || 0;
+    document.getElementById('stat-schedules-today').textContent = stats.schedulesToday || 0;
+    document.getElementById('stat-drafts-pending').textContent = stats.pendingDrafts || 0;
+
+    const draftsBadge = document.getElementById('drafts-badge');
+    if (draftsBadge) {
+      draftsBadge.textContent = stats.pendingDrafts || 0;
+      draftsBadge.style.display = stats.pendingDrafts > 0 ? 'inline-block' : 'none';
+    }
+  } catch (err) {
+    console.error('Failed to load stats:', err);
+  }
+}
+
+async function loadSchedules() {
+  try {
+    const res = await fetch('/api/schedules');
+    const data = await res.json();
+
+    const todayContainer = document.getElementById('today-schedules-list');
+    const paTodayContainer = document.getElementById('pa-today-schedules');
+    const paUpcomingContainer = document.getElementById('pa-upcoming-schedules');
+
+    renderScheduleItems(data.today || [], todayContainer);
+    if (paTodayContainer) renderScheduleItems(data.today || [], paTodayContainer, true);
+    if (paUpcomingContainer) renderScheduleItems(data.upcoming || [], paUpcomingContainer, true);
+  } catch (err) {
+    console.error('Failed to load schedules:', err);
+  }
+}
+
+function renderScheduleItems(items, container, withDelete = false) {
+  if (!container) return;
+  if (items.length === 0) {
+    container.innerHTML = '<div class="empty-state">No meetings scheduled for this period.</div>';
+    return;
+  }
+
+  container.innerHTML = items.map(item => `
+    <div class="itinerary-item">
+      <div class="itinerary-time">${item.time_slot}</div>
+      <div class="itinerary-details" style="flex: 1;">
+        <h5>${escapeHtml(item.title)}</h5>
+        <div class="itinerary-loc">📍 ${escapeHtml(item.location || 'Director Office')} ${item.description ? '• ' + escapeHtml(item.description) : ''}</div>
+      </div>
+      ${withDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteScheduleItem(${item.id})">Delete</button>` : ''}
+    </div>
+  `).join('');
+}
+
+async function loadActivityLogs() {
+  try {
+    const res = await fetch('/api/logs');
+    const logs = await res.json();
+    const container = document.getElementById('live-activity-feed');
+    if (!container) return;
+
+    if (logs.length === 0) {
+      container.innerHTML = '<div class="empty-state">Awaiting system events...</div>';
+      return;
+    }
+
+    container.innerHTML = logs.slice(0, 10).map(log => `
+      <div class="activity-item ${log.level === 'ERROR' ? 'error' : ''}">
+        <div>
+          <span style="font-weight:700; color:var(--accent-indigo);">[${log.module}]</span> ${escapeHtml(log.message)}
+        </div>
+        <span class="activity-time">${new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load logs:', err);
+  }
+}
+
+async function loadEmails() {
+  try {
+    const res = await fetch('/api/emails');
+    const emails = await res.json();
+    const tbody = document.getElementById('emails-table-body');
+    document.getElementById('analyzed-email-count').textContent = `${emails.length} Emails`;
+
+    if (emails.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No analyzed emails found yet. Click "Sync & Analyze Inbox Now".</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = emails.map(e => {
+      let priorityClass = 'badge';
+      if (e.priority === 'Urgent') priorityClass = 'badge badge-warning text-danger';
+      else if (e.priority === 'High') priorityClass = 'badge text-warning';
+
+      return `
+        <tr>
+          <td><span class="${priorityClass}">${e.priority || 'Normal'}</span></td>
+          <td><b>${escapeHtml(e.sender_name || e.sender_email)}</b></td>
+          <td>${escapeHtml(e.subject || '(No Subject)')}</td>
+          <td style="max-width: 320px;">${escapeHtml(e.summary || e.snippet)}</td>
+          <td><b style="color:var(--accent-rose);">${escapeHtml(e.action_required || 'None')}</b></td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load emails:', err);
+  }
+}
+
+async function loadDrafts() {
+  try {
+    const res = await fetch('/api/drafts');
+    const drafts = await res.json();
+    const tbody = document.getElementById('drafts-table-body');
+    if (!tbody) return;
+
+    if (drafts.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No email drafts created yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = drafts.map(d => `
+      <tr>
+        <td>
+          <span class="badge ${d.status === 'PENDING_VERIFICATION' ? 'badge-warning' : (d.status === 'VERIFIED_SENT' ? 'text-success' : 'text-danger')}">
+            ${d.status}
+          </span>
+        </td>
+        <td><b>${escapeHtml(d.recipient_email)}</b></td>
+        <td>${escapeHtml(d.subject)}</td>
+        <td style="max-width: 350px; font-size: 0.78rem;">${escapeHtml(d.body.substring(0, 140))}...</td>
+        <td>
+          ${d.status === 'PENDING_VERIFICATION' ? `
+            <button class="btn btn-sm btn-success" onclick="verifyAndSendDraft(${d.id})">Approve & Send</button>
+            <button class="btn btn-sm btn-outline" onclick="cancelDraft(${d.id})">Discard</button>
+          ` : `<span>Completed</span>`}
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load drafts:', err);
+  }
+}
+
+async function loadWhatsAppChats() {
+  try {
+    const res = await fetch('/api/whatsapp/chats');
+    const chats = await res.json();
+    const tbody = document.getElementById('wa-chats-table-body');
+    if (!tbody) return;
+
+    if (chats.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No WhatsApp messages ingested yet. Scan Director\'s QR code.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = chats.map(c => `
+      <tr>
+        <td style="font-family:var(--font-mono); font-size:0.75rem;">${new Date(c.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+        <td><b>${escapeHtml(c.sender_name || 'Unknown')}</b></td>
+        <td>${escapeHtml(c.sender_phone || '')}</td>
+        <td>${escapeHtml(c.message_text)}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load WA chats:', err);
+  }
+}
+
+async function loadLatestBriefing() {
+  try {
+    const res = await fetch('/api/briefing/latest');
+    const data = await res.json();
+    const container = document.getElementById('briefing-preview-body');
+    const downloadContainer = document.getElementById('briefing-download-container');
+
+    if (data.available) {
+      downloadContainer.innerHTML = `
+        <a href="${data.url}" download="${data.filename}" class="btn btn-sm btn-outline">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download PDF (${data.filename})
+        </a>
+      `;
+      container.innerHTML = `
+        <div style="height: 600px; width: 100%;">
+          <iframe src="${data.url}" style="width: 100%; height: 100%; border: none; border-radius: 8px;"></iframe>
+        </div>
+      `;
+    }
+  } catch (err) {
+    console.error('Failed to load briefing:', err);
+  }
+}
+
+async function forceSyncEmails() {
+  showToast('Initiating email synchronization with Gmail API & Gemini AI...');
+  try {
+    const res = await fetch('/api/emails/sync', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Successfully analyzed ${data.count} recent emails!`);
+      loadEmails();
+      loadStats();
+    } else {
+      showToast('Email sync failed: ' + (data.error || 'Check Gmail connection'));
+    }
+  } catch (err) {
+    showToast('Network error during email sync');
+  }
+}
+
+async function generateAndSendBriefingNow() {
+  showToast('Generating Executive Intelligence PDF & dispatching to Director...');
+  try {
+    const res = await fetch('/api/briefing/generate', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Executive Briefing PDF generated and delivered to Director WhatsApp!');
+      loadLatestBriefing();
+      loadStats();
+    } else {
+      showToast('Briefing failed: ' + (data.error || 'Check settings'));
+    }
+  } catch (err) {
+    showToast('Failed to trigger briefing generation');
+  }
+}
+
+// Verification Handlers
+async function verifyAndSendDraft(id) {
+  if (!confirm('Are you sure you want to dispatch this email via the Director official Gmail?')) return;
+  try {
+    const res = await fetch(`/api/drafts/${id}/confirm`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Email dispatched successfully via Gmail!');
+      loadDrafts();
+      loadStats();
+    } else {
+      showToast('Error sending email: ' + data.error);
+    }
+  } catch (err) {
+    showToast('Failed to send verified email');
+  }
+}
+
+async function cancelDraft(id) {
+  try {
+    await fetch(`/api/drafts/${id}/cancel`, { method: 'POST' });
+    showToast('Draft cancelled.');
+    loadDrafts();
+    loadStats();
+  } catch (err) {
+    showToast('Failed to cancel draft');
+  }
+}
+
+// Schedule Handlers
+function openAddScheduleModal() {
+  const modal = document.getElementById('modal-add-schedule');
+  document.getElementById('sched-date').value = new Date().toISOString().split('T')[0];
+  modal.classList.add('active');
+}
+
+function closeAddScheduleModal() {
+  document.getElementById('modal-add-schedule').classList.remove('active');
+}
+
+function setupScheduleForm() {
+  const form = document.getElementById('form-add-schedule');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      date: document.getElementById('sched-date').value,
+      time_slot: document.getElementById('sched-time').value,
+      title: document.getElementById('sched-title').value,
+      location: document.getElementById('sched-location').value,
+      description: document.getElementById('sched-desc').value,
+      priority: document.getElementById('sched-priority').value
+    };
+
+    try {
+      const res = await fetch('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Meeting added to Director itinerary!');
+        closeAddScheduleModal();
+        form.reset();
+        loadSchedules();
+        loadStats();
+      }
+    } catch (err) {
+      showToast('Failed to add schedule');
+    }
+  });
+}
+
+async function deleteScheduleItem(id) {
+  if (!confirm('Remove this meeting from Director itinerary?')) return;
+  try {
+    await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+    showToast('Meeting removed.');
+    loadSchedules();
+    loadStats();
+  } catch (err) {
+    showToast('Failed to delete meeting');
+  }
+}
+
+// Settings
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    const s = data.settings;
+
+    if (s.GEMINI_API_KEY) document.getElementById('setting-gemini-key').value = s.GEMINI_API_KEY;
+    if (s.GEMINI_MODEL) document.getElementById('setting-gemini-model').value = s.GEMINI_MODEL;
+    if (s.GOOGLE_CLIENT_ID) document.getElementById('setting-google-id').value = s.GOOGLE_CLIENT_ID;
+    if (s.GOOGLE_CLIENT_SECRET) document.getElementById('setting-google-secret').value = s.GOOGLE_CLIENT_SECRET;
+    if (s.DIRECTOR_PHONE) document.getElementById('setting-director-phone').value = s.DIRECTOR_PHONE;
+    if (s.PA_PHONE) document.getElementById('setting-pa-phone').value = s.PA_PHONE;
+    if (s.ORGANIZATION_NAME) document.getElementById('setting-org-name').value = s.ORGANIZATION_NAME;
+    if (s.DIRECTOR_TITLE) document.getElementById('setting-director-title').value = s.DIRECTOR_TITLE;
+    if (s.BRIEFING_TIME) document.getElementById('setting-briefing-time').value = s.BRIEFING_TIME;
+  } catch (err) {
+    console.error('Failed to load settings:', err);
+  }
+}
+
+function setupSettingsForm() {
+  const form = document.getElementById('settings-form');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      GEMINI_API_KEY: document.getElementById('setting-gemini-key').value,
+      GEMINI_MODEL: document.getElementById('setting-gemini-model').value,
+      GOOGLE_CLIENT_ID: document.getElementById('setting-google-id').value,
+      GOOGLE_CLIENT_SECRET: document.getElementById('setting-google-secret').value,
+      DIRECTOR_PHONE: document.getElementById('setting-director-phone').value,
+      PA_PHONE: document.getElementById('setting-pa-phone').value,
+      ORGANIZATION_NAME: document.getElementById('setting-org-name').value,
+      DIRECTOR_TITLE: document.getElementById('setting-director-title').value,
+      BRIEFING_TIME: document.getElementById('setting-briefing-time').value
+    };
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Settings saved successfully!');
+        loadStatus();
+      }
+    } catch (err) {
+      showToast('Failed to save settings');
+    }
+  });
+}
+
+function checkUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('auth') === 'success') {
+    showToast(`Google Gmail connected: ${params.get('email')}`);
+    window.history.replaceState({}, document.title, '/');
+  } else if (params.get('auth') === 'error' || params.get('auth') === 'failed') {
+    showToast(`OAuth Error: ${params.get('msg')}`);
+    window.history.replaceState({}, document.title, '/');
+  }
+}
+
+function showToast(message) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `<span>⚡</span> <span>${escapeHtml(message)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}

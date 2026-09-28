@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Executive AI Chief of Staff | Director's Office</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="nav-brand">
+      <div class="brand-logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1 id="nav-org-title">JECRC UNIVERSITY</h1>
+        <span class="brand-subtitle">Executive AI Chief of Staff • Office of the Director</span>
+      </div>
+    </div>
+
+    <div class="nav-actions">
+      <div class="status-badge" id="system-health-pill">
+        <span class="pulsing-dot online"></span>
+        <span id="health-text">System Active</span>
+      </div>
+
+      <button id="btn-sync-emails" class="btn btn-secondary">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        Sync Emails
+      </button>
+
+      <button id="btn-trigger-briefing" class="btn btn-primary">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Generate Briefing PDF
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <nav class="sidebar-menu">
+        <button class="menu-item active" data-tab="tab-overview" id="nav-tab-overview">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Executive Overview
+        </button>
+
+        <button class="menu-item" data-tab="tab-connectors" id="nav-tab-connectors">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+          WhatsApp Connectors
+          <span class="badge" id="wa-pending-badge">2</span>
+        </button>
+
+        <button class="menu-item" data-tab="tab-gmail" id="nav-tab-gmail">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          Gmail Intelligence
+        </button>
+
+        <button class="menu-item" data-tab="tab-drafts" id="nav-tab-drafts">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Drafts Verification
+          <span class="badge badge-warning" id="drafts-badge">0</span>
+        </button>
+
+        <button class="menu-item" data-tab="tab-schedule" id="nav-tab-schedule">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          PA Schedule Hub
+        </button>
+
+        <button class="menu-item" data-tab="tab-whatsapp-chats" id="nav-tab-wa-chats">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Silent WA Monitor
+        </button>
+
+        <button class="menu-item" data-tab="tab-briefings" id="nav-tab-briefings">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Briefing Archive
+        </button>
+
+        <button class="menu-item" data-tab="tab-settings" id="nav-tab-settings">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings & Keys
+        </button>
+      </nav>
+
+      <!-- System Quick Health Indicator in Sidebar -->
+      <div class="sidebar-footer">
+        <div class="connector-mini-card">
+          <div class="connector-header">
+            <span>MySQL Database</span>
+            <span class="dot-online" id="dot-db"></span>
+          </div>
+          <div class="connector-desc" id="db-desc">executive_ai_db (Ready)</div>
+        </div>
+
+        <div class="connector-mini-card">
+          <div class="connector-header">
+            <span>Gemini AI 3.7</span>
+            <span class="dot-online" id="dot-gemini"></span>
+          </div>
+          <div class="connector-desc" id="gemini-desc">Model Active</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="content-area">
+
+      <!-- ==================== TAB 1: OVERVIEW ==================== -->
+      <section class="tab-content active" id="tab-overview">
+        <div class="page-header">
+          <div>
+            <h2>Director's Executive Command Hub</h2>
+            <p class="subtitle">Autonomous AI chief of staff orchestrating WhatsApp, Gmail & Executive schedules</p>
+          </div>
+          <div class="date-display" id="current-date-display">Today: Mon, 28 Sep 2026</div>
+        </div>
+
+        <!-- Metric Stat Cards -->
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-icon-wrapper mail">
+              <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            </div>
+            <div class="stat-info">
+              <span class="stat-label">Emails Analyzed Today</span>
+              <span class="stat-value" id="stat-emails-today">0</span>
+              <span class="stat-sub text-success">Filtered & prioritized</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-icon-wrapper chat">
+              <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <div class="stat-info">
+              <span class="stat-label">Director WA Monitored</span>
+              <span class="stat-value" id="stat-chats-today">0</span>
+              <span class="stat-sub text-info">Preserved as Unread</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-icon-wrapper cal">
+              <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </div>
+            <div class="stat-info">
+              <span class="stat-label">Meetings Scheduled</span>
+              <span class="stat-value" id="stat-schedules-today">0</span>
+              <span class="stat-sub" id="stat-schedule-sub">Managed by PA</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-icon-wrapper warn">
+              <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            </div>
+            <div class="stat-info">
+              <span class="stat-label">Pending Email Drafts</span>
+              <span class="stat-value" id="stat-drafts-pending">0</span>
+              <span class="stat-sub text-warning">Awaiting Verification</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connectors Status Row -->
+        <div class="section-title">
+          <h3>Active Connectors Status</h3>
+          <span class="section-sub">Autonomous pipelines syncing live</span>
+        </div>
+
+        <div class="connectors-grid">
+          <!-- Connector 1: Director WhatsApp -->
+          <div class="connector-card">
+            <div class="connector-top">
+              <div class="connector-info">
+                <span class="connector-tag">SILENT LISTENER</span>
+                <h4>Director's WhatsApp</h4>
+                <p>Monitors texts silently without triggering blue-tick read receipts.</p>
+              </div>
+              <span class="status-indicator-pill" id="dir-status-pill">Checking...</span>
+            </div>
+            <div class="connector-footer">
+              <button class="btn btn-sm btn-outline" onclick="switchTab('tab-connectors')">View Pairing QR</button>
+            </div>
+          </div>
+
+          <!-- Connector 2: Bot WhatsApp -->
+          <div class="connector-card">
+            <div class="connector-top">
+              <div class="connector-info">
+                <span class="connector-tag">INTERACTIVE AGENT</span>
+                <h4>Executive Bot WhatsApp</h4>
+                <p>Dedicated number for Director & PA interaction, briefing dispatch, and safety verification.</p>
+              </div>
+              <span class="status-indicator-pill" id="bot-status-pill">Checking...</span>
+            </div>
+            <div class="connector-footer">
+              <button class="btn btn-sm btn-outline" onclick="switchTab('tab-connectors')">View Bot QR</button>
+            </div>
+          </div>
+
+          <!-- Connector 3: Gmail API -->
+          <div class="connector-card">
+            <div class="connector-top">
+              <div class="connector-info">
+                <span class="connector-tag">OFFICIAL GMAIL</span>
+                <h4>Google Gmail Connector</h4>
+                <p id="gmail-status-text">OAuth2 Connector for Director's University Inbox.</p>
+              </div>
+              <span class="status-indicator-pill" id="gmail-status-pill">Checking...</span>
+            </div>
+            <div class="connector-footer">
+              <a href="/auth/google" id="btn-connect-gmail" class="btn btn-sm btn-primary">Connect with Google</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Intelligence Stream & Today's Schedule Split View -->
+        <div class="grid-two-col">
+          <!-- Left: Today's Meetings -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Today's Itinerary
+              </div>
+              <button class="btn btn-sm btn-outline" onclick="openAddScheduleModal()">+ Add Meeting</button>
+            </div>
+            <div class="panel-body">
+              <div id="today-schedules-list" class="itinerary-list">
+                <div class="empty-state">Loading today's schedule...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Live Activity Logs -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                Autonomous Activity Feed
+              </div>
+              <span class="badge" id="log-count-badge">Live</span>
+            </div>
+            <div class="panel-body">
+              <div id="live-activity-feed" class="activity-feed">
+                <div class="empty-state">Awaiting system events...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 2: WHATSAPP CONNECTORS ==================== -->
+      <section class="tab-content" id="tab-connectors">
+        <div class="page-header">
+          <div>
+            <h2>Dual WhatsApp Pairing Center</h2>
+            <p class="subtitle">Baileys WebSocket connections for Director's phone & Dedicated Assistant Bot</p>
+          </div>
+        </div>
+
+        <div class="qr-pairing-grid">
+          <!-- Session 1: Director WhatsApp -->
+          <div class="qr-card">
+            <div class="qr-card-header">
+              <div class="qr-badge">SESSION 1 • SILENT MODE</div>
+              <h3>Director's WhatsApp Account</h3>
+              <p>Scan with the <b>Director's primary WhatsApp</b> (Linked Devices). This enables silent message ingestion without blue ticks and authorized replies.</p>
+            </div>
+            <div class="qr-display" id="director-qr-container">
+              <div class="qr-loading">
+                <div class="spinner"></div>
+                <p>Generating Director Pairing QR...</p>
+              </div>
+            </div>
+            <div class="qr-card-footer">
+              <div class="session-status" id="director-session-status">Status: Initializing...</div>
+              <p class="qr-note">🔒 Messages are never marked as read. WhatsApp privacy is preserved.</p>
+            </div>
+          </div>
+
+          <!-- Session 2: Executive Bot WhatsApp -->
+          <div class="qr-card">
+            <div class="qr-card-header">
+              <div class="qr-badge badge-accent">SESSION 2 • BOT NUMBER</div>
+              <h3>Executive Assistant Bot</h3>
+              <p>Scan with the <b>Dedicated Bot SIM / Number</b>. Director and PA will chat with this bot to query emails, receive briefings, and verify draft actions.</p>
+            </div>
+            <div class="qr-display" id="bot-qr-container">
+              <div class="qr-loading">
+                <div class="spinner"></div>
+                <p>Generating Bot Pairing QR...</p>
+              </div>
+            </div>
+            <div class="qr-card-footer">
+              <div class="session-status" id="bot-session-status">Status: Initializing...</div>
+              <p class="qr-note">⚡ Handles conversational queries and sends executive PDF briefings.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 3: GMAIL INTELLIGENCE ==================== -->
+      <section class="tab-content" id="tab-gmail">
+        <div class="page-header">
+          <div>
+            <h2>Director's Gmail Intelligence Hub</h2>
+            <p class="subtitle">Real-time analysis, urgency classification, and executive summaries powered by Gemini 3.7 Flash</p>
+          </div>
+          <button class="btn btn-primary" onclick="forceSyncEmails()">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Sync & Analyze Inbox Now
+          </button>
+        </div>
+
+        <div class="gmail-account-banner" id="gmail-account-info-box">
+          <div class="gmail-banner-left">
+            <div class="gmail-icon">M</div>
+            <div>
+              <h4 id="gmail-connected-address">No Gmail Connected</h4>
+              <p id="gmail-connected-sub">Click "Connect with Google" to authorize Director's official inbox.</p>
+            </div>
+          </div>
+          <a href="/auth/google" class="btn btn-outline" id="btn-reconnect-gmail">Connect / Change Account</a>
+        </div>
+
+        <div class="panel mt-4">
+          <div class="panel-header">
+            <div class="panel-title">Analyzed Emails & Action Points</div>
+            <span class="badge" id="analyzed-email-count">0 Emails</span>
+          </div>
+          <div class="panel-body no-padding">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Priority</th>
+                    <th>Sender</th>
+                    <th>Subject</th>
+                    <th>AI Executive Summary</th>
+                    <th>Action Required</th>
+                  </tr>
+                </thead>
+                <tbody id="emails-table-body">
+                  <tr>
+                    <td colspan="5" class="empty-state">No analyzed emails found. Click "Sync & Analyze Inbox Now".</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 4: DRAFTS VERIFICATION ==================== -->
+      <section class="tab-content" id="tab-drafts">
+        <div class="page-header">
+          <div>
+            <h2>Human-in-the-Loop Email Verification</h2>
+            <p class="subtitle">Drafts generated upon Director's WhatsApp instructions requiring affirmative confirmation before dispatch</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Pending & Sent Email Outbox</div>
+          </div>
+          <div class="panel-body no-padding">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Recipient</th>
+                    <th>Subject</th>
+                    <th>Draft Content Preview</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="drafts-table-body">
+                  <tr>
+                    <td colspan="5" class="empty-state">No email drafts in queue.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 5: PA SCHEDULE HUB ==================== -->
+      <section class="tab-content" id="tab-schedule">
+        <div class="page-header">
+          <div>
+            <h2>Director's PA Schedule & Itinerary Manager</h2>
+            <p class="subtitle">PA can manage the Director's calendar here or by texting <code>!schedule</code> to the Bot on WhatsApp</p>
+          </div>
+          <button class="btn btn-primary" onclick="openAddScheduleModal()">+ Schedule New Meeting</button>
+        </div>
+
+        <div class="grid-two-col">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Today's Schedule</div>
+            </div>
+            <div class="panel-body">
+              <div id="pa-today-schedules" class="itinerary-list">
+                <div class="empty-state">No meetings scheduled for today.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Upcoming Appointments</div>
+            </div>
+            <div class="panel-body">
+              <div id="pa-upcoming-schedules" class="itinerary-list">
+                <div class="empty-state">No upcoming meetings.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 6: SILENT WA MONITOR ==================== -->
+      <section class="tab-content" id="tab-whatsapp-chats">
+        <div class="page-header">
+          <div>
+            <h2>Director's WhatsApp Silent Stream</h2>
+            <p class="subtitle">Real-time cache of incoming messages. Allows the Director to ask questions ("Tarun ne kya bola?") without altering unread status</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Monitored Inbound Messages</div>
+            <span class="badge badge-info">Unread status preserved</span>
+          </div>
+          <div class="panel-body no-padding">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Sender Name</th>
+                    <th>Phone / JID</th>
+                    <th>Message Excerpt</th>
+                  </tr>
+                </thead>
+                <tbody id="wa-chats-table-body">
+                  <tr>
+                    <td colspan="4" class="empty-state">No WhatsApp messages ingested yet. Scan Director's QR in WhatsApp Connectors.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 7: BRIEFING ARCHIVE ==================== -->
+      <section class="tab-content" id="tab-briefings">
+        <div class="page-header">
+          <div>
+            <h2>Daily Executive Briefing Center</h2>
+            <p class="subtitle">Generates university-branded PDF combining Itinerary, Urgent Emails, WhatsApp digests, and AI news</p>
+          </div>
+          <button class="btn btn-primary" onclick="generateAndSendBriefingNow()">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Generate & Send to Director Now
+          </button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Latest Executive Briefing Preview</div>
+            <div id="briefing-download-container"></div>
+          </div>
+          <div class="panel-body" id="briefing-preview-body">
+            <div class="empty-state">
+              <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <p>No briefing generated yet for today.</p>
+              <button class="btn btn-primary mt-3" onclick="generateAndSendBriefingNow()">Create Today's Briefing PDF</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 8: SETTINGS ==================== -->
+      <section class="tab-content" id="tab-settings">
+        <div class="page-header">
+          <div>
+            <h2>System Configuration & Connectors</h2>
+            <p class="subtitle">Configure AI credentials, Google OAuth keys, and executive phone numbers</p>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <form id="settings-form">
+            <div class="form-section">
+              <h4>1. Google Gemini AI Engine</h4>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="setting-gemini-key">Gemini API Key</label>
+                  <input type="password" id="setting-gemini-key" class="form-input" placeholder="AIzaSy...">
+                </div>
+                <div class="form-group">
+                  <label for="setting-gemini-model">Gemini Model</label>
+                  <input type="text" id="setting-gemini-model" class="form-input" placeholder="gemini-3.7-flash" value="gemini-3.7-flash">
+                </div>
+              </div>
+              <span class="form-hint">Used for email prioritization, WhatsApp digest, and conversational intelligence (e.g. gemini-3.7-flash).</span>
+            </div>
+
+            <div class="form-section">
+              <h4>2. Google Cloud OAuth (Gmail API Connector)</h4>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="setting-google-id">Google Client ID</label>
+                  <input type="text" id="setting-google-id" class="form-input" placeholder="xxxx.apps.googleusercontent.com">
+                </div>
+                <div class="form-group">
+                  <label for="setting-google-secret">Google Client Secret</label>
+                  <input type="password" id="setting-google-secret" class="form-input" placeholder="GOCSPX-xxxx">
+                </div>
+              </div>
+              <div class="form-hint">Authorized Redirect URI to set in Google Cloud Console: <code>http://localhost:5122/auth/google/callback</code> (or <code>https://ai.jecrcuniversity.edu.in/directorbot/auth/google/callback</code>)</div>
+            </div>
+
+            <div class="form-section">
+              <h4>3. WhatsApp Numbers & Executive Roles</h4>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="setting-director-phone">Director's Phone Number (with Country Code)</label>
+                  <input type="text" id="setting-director-phone" class="form-input" placeholder="e.g. 919876543210">
+                  <span class="form-hint">Will receive the morning PDF briefings and can execute commands.</span>
+                </div>
+                <div class="form-group">
+                  <label for="setting-pa-phone">PA's Phone Number</label>
+                  <input type="text" id="setting-pa-phone" class="form-input" placeholder="e.g. 919812345678">
+                  <span class="form-hint">Authorized to push schedules via WhatsApp (<code>!schedule ...</code>).</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h4>4. University / Institutional Branding</h4>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="setting-org-name">University / Organization Name</label>
+                  <input type="text" id="setting-org-name" class="form-input" placeholder="JECRC University">
+                </div>
+                <div class="form-group">
+                  <label for="setting-director-title">Executive Title</label>
+                  <input type="text" id="setting-director-title" class="form-input" placeholder="Office of the Director">
+                </div>
+              </div>
+              <div class="form-group mt-3">
+                <label for="setting-briefing-time">Daily Morning Briefing Time (24h format)</label>
+                <input type="time" id="setting-briefing-time" class="form-input" value="08:00">
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Save Configuration</button>
+              <span id="settings-save-status" class="save-status-msg"></span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Modal: Add Schedule Meeting -->
+  <div class="modal-backdrop" id="modal-add-schedule">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Schedule Director Appointment</h3>
+        <button class="modal-close" onclick="closeAddScheduleModal()">&times;</button>
+      </div>
+      <form id="form-add-schedule">
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="sched-date">Date</label>
+              <input type="date" id="sched-date" class="form-input" required>
+            </div>
+            <div class="form-group">
+              <label for="sched-time">Time Slot</label>
+              <input type="text" id="sched-time" class="form-input" placeholder="e.g. 10:30 AM - 11:30 AM" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="sched-title">Meeting Title / Agenda</label>
+            <input type="text" id="sched-title" class="form-input" placeholder="e.g. AICTE Compliance Review Meeting" required>
+          </div>
+          <div class="form-group">
+            <label for="sched-location">Location / Link</label>
+            <input type="text" id="sched-location" class="form-input" placeholder="Board Room / Google Meet">
+          </div>
+          <div class="form-group">
+            <label for="sched-desc">Notes / Attendees</label>
+            <textarea id="sched-desc" class="form-input" rows="2" placeholder="Attendees: Registrar, Dean Academics..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="sched-priority">Priority</label>
+            <select id="sched-priority" class="form-input">
+              <option value="Normal">Normal</option>
+              <option value="High">High</option>
+              <option value="Urgent">Urgent (VIP / Regulatory)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeAddScheduleModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save to Itinerary</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>
