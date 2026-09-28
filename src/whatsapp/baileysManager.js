@@ -191,9 +191,8 @@ export async function startBotSession() {
       if (!msg.message || msg.key.fromMe) continue;
       const jid = msg.key.remoteJid;
 
-      // STRICT FILTER: Bot ONLY operates in direct 1-on-1 private chats with authorized individuals.
-      // Silently ignore all groups (@g.us), broadcasts (@broadcast), newsletters (@newsletter), or group participants.
-      if (!jid || !jid.endsWith('@s.whatsapp.net') || jid.includes('@g.us') || msg.key.participant) {
+      // Filter out group chats, status broadcasts, and channel announcements
+      if (!jid || jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) {
         continue;
       }
 
@@ -204,7 +203,16 @@ export async function startBotSession() {
                    '';
       if (!text.trim()) continue;
 
-      const senderPhone = jid.split('@')[0];
+      // Extract sender phone number handling both standard and multi-device WhatsApp structures
+      let senderPhone = '';
+      if (msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
+        senderPhone = msg.key.remoteJidAlt.split('@')[0].split(':')[0];
+      } else if (msg.key.participant && msg.key.participant.includes('@s.whatsapp.net')) {
+        senderPhone = msg.key.participant.split('@')[0].split(':')[0];
+      } else {
+        senderPhone = jid.split('@')[0].split(':')[0];
+      }
+
       await handleBotIncomingMessage(jid, senderPhone, text);
     }
   });
@@ -217,28 +225,28 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
   try {
     const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE || '';
     const paPhone = (await getSetting('PA_PHONE')) || process.env.PA_PHONE || '';
+    const connectedDirectorPhone = directorSock?.user?.id ? directorSock.user.id.split('@')[0].split(':')[0] : '';
 
     const cleanPhone = (p) => p ? p.replace(/[^0-9]/g, '') : '';
     const cleanSender = cleanPhone(senderPhone);
-    const cleanDir = cleanPhone(directorPhone);
+    const cleanDir = cleanPhone(directorPhone) || cleanPhone(connectedDirectorPhone);
     const cleanPa = cleanPhone(paPhone);
 
-    // If neither Director nor PA is configured with a valid phone number (at least 10 digits), drop silently
-    if ((!cleanDir || cleanDir.length < 10) && (!cleanPa || cleanPa.length < 10)) {
-      console.warn(`[Bot Security] Inbound message dropped: Neither Director nor PA phone number is configured in settings.`);
-      return;
-    }
-
-    // Strict 10-digit matcher (avoids false positives with short strings or prefix mismatches)
+    // Robust phone matcher: checks equality, endsWith, or last 10 digits
     const matchPhone = (sender, target) => {
       if (!sender || !target) return false;
-      if (sender.length < 10 || target.length < 10) return false;
       if (sender === target) return true;
-      return sender.slice(-10) === target.slice(-10);
+      if (sender.length >= 10 && target.length >= 10) {
+        if (sender.endsWith(target) || target.endsWith(sender)) return true;
+        if (sender.slice(-10) === target.slice(-10)) return true;
+      }
+      return false;
     };
 
     const isDirector = matchPhone(cleanSender, cleanDir);
     const isPA = matchPhone(cleanSender, cleanPa);
+
+    console.log(`[Bot WhatsApp] Inbound text from "${senderPhone}" (clean: ${cleanSender}) to bot. Match check -> isDirector: ${isDirector} (target: ${cleanDir || 'NONE'}), isPA: ${isPA} (target: ${cleanPa || 'NONE'})`);
 
     // --- STRICT ACCESS CONTROL / SECURITY FIREWALL ---
     // If the sender is NEITHER Director NOR PA, SILENTLY DROP THE MESSAGE!
