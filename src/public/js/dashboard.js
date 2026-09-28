@@ -7,11 +7,19 @@ if (basePath === '/' || !basePath) {
   basePath = '';
 }
 
+// Helper to resolve URLs with subpath support
+function resolveUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  const clean = url.startsWith('/') ? url : `/${url}`;
+  return `${basePath}${clean}`;
+}
+
 // Auto-prefix all relative API calls with the subpath
 const originalFetch = window.fetch;
 window.fetch = function(url, options) {
   if (typeof url === 'string' && url.startsWith('/api/')) {
-    url = `${basePath}${url}`;
+    url = resolveUrl(url);
   }
   return originalFetch.call(this, url, options);
 };
@@ -399,8 +407,8 @@ async function loadLatestBriefing() {
     const downloadContainer = document.getElementById('briefing-download-container');
 
     if (data.available) {
-      const viewUrl = data.viewUrl || data.url;
-      const downloadUrl = data.downloadUrl || data.url;
+      const viewUrl = resolveUrl(data.viewUrl || data.url);
+      const downloadUrl = resolveUrl(data.downloadUrl || data.url);
 
       downloadContainer.innerHTML = `
         <a href="${viewUrl}" target="_blank" class="btn btn-sm btn-primary">
@@ -456,14 +464,16 @@ async function loadBriefingArchives() {
 
     tbody.innerHTML = list.map(item => {
       const dateFormatted = item.mtime ? new Date(item.mtime).toLocaleString() : 'Recent';
+      const viewUrl = resolveUrl(item.viewUrl);
+      const downloadUrl = resolveUrl(item.downloadUrl);
       return `
         <tr>
           <td><b>${item.filename}</b></td>
           <td>${item.sizeFormatted}</td>
           <td>${dateFormatted}</td>
           <td>
-            <a href="${item.viewUrl}" target="_blank" class="btn btn-xs btn-outline">View</a>
-            <a href="${item.downloadUrl}" download="${item.filename}" class="btn btn-xs btn-outline">Download</a>
+            <a href="${viewUrl}" target="_blank" class="btn btn-xs btn-outline">View</a>
+            <a href="${downloadUrl}" download="${item.filename}" class="btn btn-xs btn-outline">Download</a>
           </td>
         </tr>
       `;

@@ -36,6 +36,18 @@ setSocketIO(io);
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Subpath & Reverse Proxy Compatibility Middleware
+app.use((req, res, next) => {
+  if (req.url === '/directorbot') {
+    return res.redirect('/directorbot/');
+  }
+  if (req.url.startsWith('/directorbot/')) {
+    req.url = req.url.substring('/directorbot'.length);
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'src/public')));
 app.use('/storage', express.static(path.join(__dirname, 'storage')));
 
@@ -442,12 +454,16 @@ app.get('/api/briefing/latest', (req, res) => {
   });
 });
 
-app.get('/api/briefing/view/:filename', (req, res) => {
-  const filename = path.basename(req.params.filename);
+app.get(['/api/briefing/view/:filename', '/api/briefing/view', '/directorbot/api/briefing/view/:filename', '/directorbot/api/briefing/view'], (req, res) => {
+  const rawParam = req.params.filename || req.query.file;
+  if (!rawParam) {
+    return res.status(400).send('Filename parameter required');
+  }
+  const filename = path.basename(rawParam);
   const filePath = path.join(__dirname, 'storage/briefings', filename);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).send('Briefing PDF file not found.');
+    return res.status(404).send(`Briefing PDF file not found: ${filename}`);
   }
 
   res.setHeader('Content-Type', 'application/pdf');
@@ -457,12 +473,16 @@ app.get('/api/briefing/view/:filename', (req, res) => {
   stream.pipe(res);
 });
 
-app.get('/api/briefing/download/:filename', (req, res) => {
-  const filename = path.basename(req.params.filename);
+app.get(['/api/briefing/download/:filename', '/api/briefing/download', '/directorbot/api/briefing/download/:filename', '/directorbot/api/briefing/download'], (req, res) => {
+  const rawParam = req.params.filename || req.query.file;
+  if (!rawParam) {
+    return res.status(400).send('Filename parameter required');
+  }
+  const filename = path.basename(rawParam);
   const filePath = path.join(__dirname, 'storage/briefings', filename);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).send('Briefing PDF file not found.');
+    return res.status(404).send(`Briefing PDF file not found: ${filename}`);
   }
 
   res.download(filePath, filename);
