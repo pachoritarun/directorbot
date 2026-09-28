@@ -37,30 +37,41 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'src/public')));
 app.use('/storage', express.static(path.join(__dirname, 'storage')));
 
+// Helper to get dashboard root URL for redirects
+async function getDashboardRedirectUrl() {
+  const redirectUri = (await getSetting('GOOGLE_REDIRECT_URI')) || process.env.GOOGLE_REDIRECT_URI || '';
+  if (redirectUri.includes('/auth/google/callback')) {
+    return redirectUri.replace(/\/auth\/google\/callback.*$/, '');
+  }
+  return '';
+}
+
 // --- Google OAuth2 Routes ---
 app.get('/auth/google', async (req, res) => {
   try {
     const url = await getAuthUrl();
     res.redirect(url);
   } catch (err) {
-    res.status(500).send(`<h3>Google OAuth Error</h3><p>${err.message}</p><p><a href="/">Back to Dashboard</a></p>`);
+    const dash = await getDashboardRedirectUrl();
+    res.status(500).send(`<h3>Google OAuth Error</h3><p>${err.message}</p><p><a href="${dash || '/'}">Back to Dashboard</a></p>`);
   }
 });
 
 app.get('/auth/google/callback', async (req, res) => {
+  const dash = await getDashboardRedirectUrl();
   const { code, error } = req.query;
   if (error) {
-    return res.redirect(`/?auth=failed&msg=${encodeURIComponent(error)}`);
+    return res.redirect(`${dash}/?auth=failed&msg=${encodeURIComponent(error)}`);
   }
   if (!code) {
-    return res.redirect('/?auth=failed&msg=Missing_authorization_code');
+    return res.redirect(`${dash}/?auth=failed&msg=Missing_authorization_code`);
   }
 
   try {
     const result = await handleOAuthCallback(code);
-    res.redirect(`/?auth=success&email=${encodeURIComponent(result.email)}`);
+    res.redirect(`${dash}/?auth=success&email=${encodeURIComponent(result.email)}`);
   } catch (err) {
-    res.redirect(`/?auth=error&msg=${encodeURIComponent(err.message)}`);
+    res.redirect(`${dash}/?auth=error&msg=${encodeURIComponent(err.message)}`);
   }
 });
 

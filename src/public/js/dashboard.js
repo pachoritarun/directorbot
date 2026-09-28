@@ -588,12 +588,16 @@ function setupSettingsForm() {
 
 function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);
+  const cleanUrl = basePath ? `${basePath}/` : window.location.pathname;
   if (params.get('auth') === 'success') {
     showToast(`Google Gmail connected: ${params.get('email')}`);
-    window.history.replaceState({}, document.title, '/');
+    window.history.replaceState({}, document.title, cleanUrl);
+    loadStatus();
+    loadStats();
+    loadEmails();
   } else if (params.get('auth') === 'error' || params.get('auth') === 'failed') {
     showToast(`OAuth Error: ${params.get('msg')}`);
-    window.history.replaceState({}, document.title, '/');
+    window.history.replaceState({}, document.title, cleanUrl);
   }
 }
 
