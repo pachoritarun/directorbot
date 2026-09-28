@@ -2,13 +2,171 @@ import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { synthesizeEditorialBrief } from './geminiService.js';
+import { getSetting } from '../database/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function formatEditorialDate(dateStr) {
+  try {
+    const d = new Date(dateStr);
+    const day = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+    const month = d.toLocaleDateString('en-US', { month: 'long' }).toUpperCase();
+    const dayNum = d.getDate();
+    const year = d.getFullYear();
+    return `${day} · ${month} ${dayNum} ${year}`;
+  } catch (e) {
+    return (dateStr || '').toUpperCase();
+  }
+}
+
+function getFormattedTopTimestamp() {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  const y = String(now.getFullYear()).slice(-2);
+  const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return `${m}/${d}/${y}, ${time}`;
+}
+
+function drawPageTopHeader(doc, topTimestamp) {
+  doc.save();
+  doc.fontSize(8.5).font('Helvetica').fillColor('#6B7280');
+  doc.text(topTimestamp, 48, 38);
+  doc.text('Morning brief', 48, 38, { width: 499, align: 'right' });
+  doc.restore();
+}
+
+function drawMinimalistIllustration(doc, y) {
+  doc.save();
+  // Minimalist rising sun outline in rose / coral red (#E11D48)
+  doc.circle(135, y + 20, 8.5)
+     .lineWidth(1.1)
+     .strokeColor('#E11D48')
+     .stroke();
+
+  // Minimal flying birds in upper right sky
+  doc.lineWidth(1).strokeColor('#1F2937');
+  // Bird 1
+  doc.moveTo(380, y + 16)
+     .bezierCurveTo(383, y + 12, 387, y + 12, 390, y + 16)
+     .bezierCurveTo(393, y + 12, 397, y + 12, 400, y + 16)
+     .stroke();
+
+  // Bird 2
+  doc.moveTo(395, y + 25)
+     .bezierCurveTo(398, y + 21, 402, y + 21, 405, y + 25)
+     .bezierCurveTo(408, y + 21, 412, y + 21, 415, y + 25)
+     .stroke();
+
+  // Rolling hill contour line stretching smoothly across page
+  doc.lineWidth(1.2).strokeColor('#1F2937');
+  doc.moveTo(48, y + 46)
+     .bezierCurveTo(180, y + 40, 290, y + 34, 420, y + 44)
+     .bezierCurveTo(460, y + 46, 500, y + 46, 547, y + 46)
+     .stroke();
+  doc.restore();
+}
+
+function drawTimelineGrid(doc, y, timelineSlots = []) {
+  const colW = 145;
+  const col1X = 48;
+  const col2X = 210;
+  const col3X = 372;
+  const xs = [col1X, col2X, col3X];
+
+  // Thin vertical rules
+  doc.save();
+  doc.lineWidth(0.75).strokeColor('#E5E7EB');
+  doc.moveTo(198, y).lineTo(198, y + 70).stroke();
+  doc.moveTo(360, y).lineTo(360, y + 70).stroke();
+  doc.restore();
+
+  timelineSlots.slice(0, 3).forEach((slot, i) => {
+    const x = xs[i];
+    const w = (i === 2) ? 175 : colW;
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#111827')
+       .text(slot.time, x, y);
+
+    doc.fontSize(8).font('Helvetica').fillColor('#4B5563')
+       .text(slot.text, x, y + 15, { width: w, lineGap: 2.2 });
+  });
+
+  // Thin horizontal rule below timeline
+  const ruleY = y + 84;
+  doc.save();
+  doc.lineWidth(0.75).strokeColor('#E5E7EB');
+  doc.moveTo(48, ruleY).lineTo(547, ruleY).stroke();
+  doc.restore();
+
+  return ruleY + 24;
+}
+
+function sanitizeText(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/₹/g, 'Rs. ')
+    .replace(/’/g, "'")
+    .replace(/‘/g, "'")
+    .replace(/“/g, '"')
+    .replace(/”/g, '"')
+    .replace(/—/g, ' - ')
+    .replace(/–/g, '-');
+}
+
+function drawEditorialCategory(doc, categoryTitle, items = [], state) {
+  if (!items || items.length === 0) return;
+
+  if (state.y + 70 > doc.page.height - 70) {
+    doc.addPage();
+    drawPageTopHeader(doc, state.topTimestamp);
+    state.y = 52;
+  }
+
+  // Category Header
+  doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#111827')
+     .text(categoryTitle.toUpperCase(), 48, state.y, { characterSpacing: 1.2 });
+  state.y += 20;
+
+  items.forEach((item, index) => {
+    const titleText = sanitizeText(item.title);
+    const bodyText = sanitizeText(item.body);
+
+    doc.fontSize(10).font('Times-Bold');
+    const titleH = doc.heightOfString(titleText, { width: 475 });
+    doc.fontSize(9).font('Helvetica');
+    const bodyH = doc.heightOfString(bodyText, { width: 475, lineGap: 3 });
+    const totalH = titleH + bodyH + 18;
+
+    if (state.y + totalH > doc.page.height - 75) {
+      doc.addPage();
+      drawPageTopHeader(doc, state.topTimestamp);
+      state.y = 52;
+    }
+
+    // Number on left
+    doc.fontSize(9).font('Helvetica').fillColor('#9CA3AF')
+       .text(String(index + 1), 48, state.y);
+
+    // Headline
+    doc.fontSize(10).font('Times-Bold').fillColor('#111827')
+       .text(titleText, 72, state.y, { width: 475 });
+
+    // Narrative Body
+    doc.fontSize(9).font('Helvetica').fillColor('#4B5563')
+       .text(bodyText, 72, state.y + titleH + 4, { width: 475, lineGap: 3 });
+
+    state.y += totalH;
+  });
+
+  state.y += 18;
+}
+
 export async function generateExecutiveBriefingPdf({
   dateStr,
-  organizationName = 'University Executive Office',
+  directorName = null,
+  organizationName = 'JECRC University',
   directorTitle = 'Office of the Director',
   schedules = [],
   emails = [],
@@ -23,12 +181,33 @@ export async function generateExecutiveBriefingPdf({
   const safeDate = dateStr.replace(/[^0-9-]/g, '_');
   const filePath = path.join(outputDir, `executive_briefing_${safeDate}.pdf`);
 
+  // Resolve Director Name
+  let resolvedDirectorName = directorName;
+  if (!resolvedDirectorName) {
+    resolvedDirectorName = (await getSetting('DIRECTOR_NAME')) || 'Dheemant';
+  }
+
+  // Synthesize editorial content matching pdf.pdf
+  const chatsList = whatsappSummary?.summary_points || [];
+  const briefData = await synthesizeEditorialBrief({
+    dateStr,
+    directorName: resolvedDirectorName,
+    schedules,
+    emails,
+    chats: chatsList,
+    edTechNews
+  });
+
+  const topTimestamp = getFormattedTopTimestamp();
+  const dateFormatted = formatEditorialDate(dateStr);
+
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
-      margin: 40,
+      margin: 48,
+      bufferPages: true,
       info: {
-        Title: `Executive Briefing - ${dateStr}`,
+        Title: `Morning Brief - ${dateStr}`,
         Author: 'Executive AI Chief of Staff'
       }
     });
@@ -36,172 +215,62 @@ export async function generateExecutiveBriefingPdf({
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
 
-    // Color Palette
-    const NAVY = '#0F172A';
-    const SLATE = '#334155';
-    const MUTED = '#64748B';
-    const GOLD = '#D97706';
-    const LIGHT_BG = '#F8FAFC';
-    const BORDER = '#E2E8F0';
-    const RED = '#DC2626';
-
-    // Header Top Bar
-    doc.rect(0, 0, doc.page.width, 14).fill(NAVY);
-
-    // Organization & Header Title
-    doc.fontSize(10).fillColor(GOLD).font('Helvetica-Bold')
-       .text(organizationName.toUpperCase(), 40, 30, { characterSpacing: 1.5 });
-    
-    doc.fontSize(22).fillColor(NAVY).font('Helvetica-Bold')
-       .text('EXECUTIVE DAILY BRIEFING', 40, 46);
-
-    doc.fontSize(10).fillColor(MUTED).font('Helvetica')
-       .text(`${directorTitle}  •  Prepared for: ${dateStr}  •  CONFIDENTIAL`, 40, 74);
-
-    // Horizontal Rule
-    doc.strokeColor(BORDER).lineWidth(1.5).moveTo(40, 92).lineTo(doc.page.width - 40, 92).stroke();
-
-    let y = 110;
-
-    const checkPageBreak = (neededHeight) => {
-      if (y + neededHeight > doc.page.height - 50) {
-        doc.addPage();
-        y = 40;
-      }
+    const state = {
+      y: 48,
+      topTimestamp
     };
 
-    // --- Section Helper ---
-    const drawSectionHeader = (iconText, title) => {
-      checkPageBreak(50);
-      doc.rect(40, y, doc.page.width - 80, 24).fill(LIGHT_BG);
-      doc.fontSize(11).fillColor(NAVY).font('Helvetica-Bold')
-         .text(`${iconText}  ${title.toUpperCase()}`, 50, y + 6);
-      y += 34;
-    };
+    // --- PAGE 1 ---
+    drawPageTopHeader(doc, topTimestamp);
 
-    // --- SECTION 1: TODAY'S SCHEDULE & MEETINGS ---
-    drawSectionHeader('[1]', "Today's Official Itinerary & Meetings");
-    if (!schedules || schedules.length === 0) {
-      doc.fontSize(9.5).fillColor(MUTED).font('Helvetica-Oblique')
-         .text('No scheduled appointments recorded by PA for today.', 50, y);
-      y += 24;
-    } else {
-      schedules.forEach((item) => {
-        checkPageBreak(40);
-        doc.rect(45, y, 70, 18).fill('#E0E7FF');
-        doc.fontSize(8.5).fillColor('#3730A3').font('Helvetica-Bold')
-           .text(item.time_slot, 50, y + 4, { width: 60, align: 'center' });
+    // Date Subtitle
+    state.y = 68;
+    doc.fontSize(8.5).font('Helvetica').fillColor('#6B7280')
+       .text(dateFormatted, 48, state.y, { characterSpacing: 1.5 });
 
-        doc.fontSize(10).fillColor(NAVY).font('Helvetica-Bold')
-           .text(item.title, 125, y + 2, { width: 300 });
+    // Hero Headline
+    state.y = 88;
+    const cleanHeadline = sanitizeText(briefData.headline);
+    doc.fontSize(24).font('Times-Bold').fillColor('#111827')
+       .text(cleanHeadline, 48, state.y, { width: 499, lineGap: 3 });
 
-        if (item.location) {
-          doc.fontSize(8.5).fillColor(MUTED).font('Helvetica')
-             .text(`Loc: ${item.location}`, 430, y + 3, { width: 120, align: 'right' });
-        }
+    const headlineHeight = doc.heightOfString(cleanHeadline, { width: 499, font: 'Times-Bold', size: 24, lineGap: 3 });
+    const illustrationY = state.y + headlineHeight + 10;
 
-        y += 26;
-      });
-      y += 8;
+    // Artistic Landscape Illustration
+    drawMinimalistIllustration(doc, illustrationY);
+
+    // 3-Column Timeline
+    const timelineY = illustrationY + 68;
+    state.y = drawTimelineGrid(doc, timelineY, briefData.timeline);
+
+    // Categories
+    drawEditorialCategory(doc, 'NEEDS ATTENTION', briefData.needsAttention, state);
+    drawEditorialCategory(doc, 'RESOLVED', briefData.resolved, state);
+    drawEditorialCategory(doc, 'HIGHER ED & ADMISSIONS, INDIA', briefData.higherEdIndia, state);
+    drawEditorialCategory(doc, 'AI & EDTECH', briefData.aiEdTech, state);
+    drawEditorialCategory(doc, 'JAIPUR & RAJASTHAN', briefData.jaipurRajasthan, state);
+
+    // Final Footnote on last page
+    doc.page.margins.bottom = 0;
+    doc.fontSize(8.5).font('Helvetica-Oblique').fillColor('#6B7280')
+       .text("Calendar and chat aren't connected yet, so the shape of the day above is read from the inbox alone.", 48, doc.page.height - 58, { width: 499, lineBreak: false });
+
+    // Apply Page Numbers & Domain Reference across all buffered pages
+    const range = doc.bufferedPageRange();
+    const totalPages = range.count;
+
+    for (let i = 0; i < totalPages; i++) {
+      doc.switchToPage(i);
+      const oldBottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+
+      doc.fontSize(7.5).font('Helvetica').fillColor('#6B7280');
+      doc.text('https://ai.jecrcuniversity.edu.in/...', 48, doc.page.height - 28, { lineBreak: false });
+      doc.text(`${i + 1}/${totalPages}`, 48, doc.page.height - 28, { align: 'right', width: 499, lineBreak: false });
+
+      doc.page.margins.bottom = oldBottom;
     }
-
-    // --- SECTION 2: HIGH PRIORITY EMAIL ACTION ITEMS ---
-    drawSectionHeader('[2]', 'High-Priority Email Intelligence & Actions');
-    const priorityEmails = (emails || []).filter(e => e.priority === 'Urgent' || e.priority === 'High');
-    const displayEmails = priorityEmails.length > 0 ? priorityEmails : (emails || []).slice(0, 3);
-
-    if (displayEmails.length === 0) {
-      doc.fontSize(9.5).fillColor(MUTED).font('Helvetica-Oblique')
-         .text('Inbox clear. No urgent pending emails require executive intervention.', 50, y);
-      y += 24;
-    } else {
-      displayEmails.forEach((email) => {
-        checkPageBreak(55);
-        const isUrgent = email.priority === 'Urgent';
-        doc.rect(45, y, 50, 16).fill(isUrgent ? '#FEE2E2' : '#FEF3C7');
-        doc.fontSize(8).fillColor(isUrgent ? RED : GOLD).font('Helvetica-Bold')
-           .text(email.priority.toUpperCase(), 47, y + 3, { width: 46, align: 'center' });
-
-        doc.fontSize(10).fillColor(NAVY).font('Helvetica-Bold')
-           .text(email.subject || '(No Subject)', 105, y + 2, { width: doc.page.width - 150 });
-        y += 18;
-
-        doc.fontSize(8.5).fillColor(SLATE).font('Helvetica-Bold')
-           .text(`From: ${email.from || email.senderName}`, 50, y);
-        y += 14;
-
-        if (email.summary) {
-          doc.fontSize(8.5).fillColor(SLATE).font('Helvetica')
-             .text(`Summary: ${email.summary}`, 50, y, { width: doc.page.width - 100 });
-          y += doc.heightOfString(`Summary: ${email.summary}`, { width: doc.page.width - 100 }) + 4;
-        }
-
-        if (email.action_required) {
-          doc.fontSize(8.5).fillColor(RED).font('Helvetica-Bold')
-             .text(`Action Required: ${email.action_required}`, 50, y, { width: doc.page.width - 100 });
-          y += doc.heightOfString(`Action Required: ${email.action_required}`, { width: doc.page.width - 100 }) + 6;
-        }
-        y += 4;
-      });
-    }
-
-    // --- SECTION 3: WHATSAPP PENDING MATTERS (SILENT DIGEST) ---
-    drawSectionHeader('[3]', "WhatsApp Inbound Priority Digest (Kept Unread)");
-    if (!whatsappSummary || (!whatsappSummary.urgent_alerts?.length && !whatsappSummary.summary_points?.length)) {
-      doc.fontSize(9.5).fillColor(MUTED).font('Helvetica-Oblique')
-         .text('No high-priority incoming WhatsApp messages awaiting response.', 50, y);
-      y += 24;
-    } else {
-      if (whatsappSummary.urgent_alerts?.length) {
-        whatsappSummary.urgent_alerts.forEach(alert => {
-          checkPageBreak(30);
-          doc.fontSize(9).fillColor(RED).font('Helvetica-Bold')
-             .text(`* URGENT: ${alert}`, 50, y, { width: doc.page.width - 100 });
-          y += 16;
-        });
-      }
-      if (whatsappSummary.summary_points?.length) {
-        whatsappSummary.summary_points.slice(0, 4).forEach(point => {
-          checkPageBreak(30);
-          doc.fontSize(9).fillColor(SLATE).font('Helvetica')
-             .text(`• ${point}`, 50, y, { width: doc.page.width - 100 });
-          y += 16;
-        });
-      }
-      y += 6;
-    }
-
-    // --- SECTION 4: EDTECH & AI STRATEGIC DEVELOPMENTS ---
-    drawSectionHeader('[4]', 'Top EdTech & Higher-Ed AI Strategic Trends');
-    if (!edTechNews || edTechNews.length === 0) {
-      doc.fontSize(9.5).fillColor(MUTED).font('Helvetica-Oblique')
-         .text('AI news curation service updating.', 50, y);
-      y += 24;
-    } else {
-      edTechNews.forEach((news, idx) => {
-        checkPageBreak(45);
-        doc.fontSize(9.5).fillColor(NAVY).font('Helvetica-Bold')
-           .text(`${idx + 1}. ${news.title}`, 50, y, { width: doc.page.width - 100 });
-        y += 14;
-
-        if (news.source) {
-          doc.fontSize(8).fillColor(GOLD).font('Helvetica')
-             .text(`Source: ${news.source}`, 50, y);
-          y += 12;
-        }
-
-        if (news.takeaway) {
-          doc.fontSize(8.5).fillColor(SLATE).font('Helvetica')
-             .text(`Executive Takeaway: ${news.takeaway}`, 50, y, { width: doc.page.width - 100 });
-          y += doc.heightOfString(`Executive Takeaway: ${news.takeaway}`, { width: doc.page.width - 100 }) + 8;
-        }
-      });
-    }
-
-    // Footer
-    const bottom = doc.page.height - 30;
-    doc.fontSize(8).fillColor(MUTED).font('Helvetica')
-       .text('Generated automatically by University Executive AI Chief of Staff. All rights reserved.', 40, bottom, { align: 'center' });
 
     doc.end();
 

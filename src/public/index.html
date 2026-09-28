@@ -291,6 +291,9 @@
             </div>
             <div class="qr-card-footer">
               <div class="session-status" id="director-session-status">Status: Initializing...</div>
+              <button type="button" class="btn btn-outline btn-sm mt-2" id="btn-disconnect-director-wa" onclick="disconnectWhatsApp('director')">
+                Disconnect Director Session
+              </button>
               <p class="qr-note">🔒 Messages are never marked as read. WhatsApp privacy is preserved.</p>
             </div>
           </div>
@@ -310,6 +313,9 @@
             </div>
             <div class="qr-card-footer">
               <div class="session-status" id="bot-session-status">Status: Initializing...</div>
+              <button type="button" class="btn btn-outline btn-sm mt-2" id="btn-disconnect-bot-wa" onclick="disconnectWhatsApp('bot')">
+                Disconnect Bot Session
+              </button>
               <p class="qr-note">⚡ Handles conversational queries and sends executive PDF briefings.</p>
             </div>
           </div>
@@ -483,24 +489,49 @@
         <div class="page-header">
           <div>
             <h2>Daily Executive Briefing Center</h2>
-            <p class="subtitle">Generates university-branded PDF combining Itinerary, Urgent Emails, WhatsApp digests, and AI news</p>
+            <p class="subtitle">Publication-grade editorial morning briefs synthesized by AI and dispatched directly to Director WhatsApp</p>
           </div>
           <button class="btn btn-primary" onclick="generateAndSendBriefingNow()">
             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            Generate & Send to Director Now
+            Generate & Dispatch Today's PDF
           </button>
         </div>
 
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title">Latest Executive Briefing Preview</div>
-            <div id="briefing-download-container"></div>
+            <div id="briefing-download-container" style="display:flex; gap:10px; align-items:center;"></div>
           </div>
-          <div class="panel-body" id="briefing-preview-body">
+          <div class="panel-body" id="briefing-preview-body" style="padding: 16px;">
             <div class="empty-state">
               <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
               <p>No briefing generated yet for today.</p>
               <button class="btn btn-primary mt-3" onclick="generateAndSendBriefingNow()">Create Today's Briefing PDF</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Historical Archives -->
+        <div class="panel mt-4">
+          <div class="panel-header">
+            <div class="panel-title">Historical Executive Briefing Archives</div>
+            <button class="btn btn-outline btn-sm" onclick="loadBriefingArchives()">Refresh Archive List</button>
+          </div>
+          <div class="panel-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Briefing Date / Filename</th>
+                    <th>File Size</th>
+                    <th>Generated At</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="briefings-history-table-body">
+                  <tr><td colspan="4" class="text-center">Loading archives...</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -648,12 +679,18 @@
               <h4>3. WhatsApp Numbers & Executive Roles</h4>
               <div class="form-grid">
                 <div class="form-group">
-                  <label for="setting-director-phone">Director's Phone Number (with Country Code)</label>
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <label for="setting-director-phone">Director's Phone Number (with Country Code)</label>
+                    <button type="button" class="btn btn-outline btn-xs" onclick="document.getElementById('setting-director-phone').value=''">Clear</button>
+                  </div>
                   <input type="text" id="setting-director-phone" class="form-input" placeholder="e.g. 919876543210">
                   <span class="form-hint">Will receive the morning PDF briefings and can execute commands.</span>
                 </div>
                 <div class="form-group">
-                  <label for="setting-pa-phone">PA's Phone Number</label>
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <label for="setting-pa-phone">PA's Phone Number</label>
+                    <button type="button" class="btn btn-outline btn-xs" onclick="document.getElementById('setting-pa-phone').value=''">Clear</button>
+                  </div>
                   <input type="text" id="setting-pa-phone" class="form-input" placeholder="e.g. 919812345678">
                   <span class="form-hint">Authorized to push schedules via WhatsApp (<code>!schedule ...</code>).</span>
                 </div>
@@ -664,17 +701,23 @@
               <h4>4. University / Institutional Branding</h4>
               <div class="form-grid">
                 <div class="form-group">
+                  <label for="setting-director-name">Director's Name (for Morning Briefings)</label>
+                  <input type="text" id="setting-director-name" class="form-input" placeholder="e.g. Dheemant">
+                </div>
+                <div class="form-group">
                   <label for="setting-org-name">University / Organization Name</label>
                   <input type="text" id="setting-org-name" class="form-input" placeholder="JECRC University">
                 </div>
+              </div>
+              <div class="form-grid mt-3">
                 <div class="form-group">
                   <label for="setting-director-title">Executive Title</label>
                   <input type="text" id="setting-director-title" class="form-input" placeholder="Office of the Director">
                 </div>
-              </div>
-              <div class="form-group mt-3">
-                <label for="setting-briefing-time">Daily Morning Briefing Time (24h format)</label>
-                <input type="time" id="setting-briefing-time" class="form-input" value="08:00">
+                <div class="form-group">
+                  <label for="setting-briefing-time">Daily Morning Briefing Time (24h format)</label>
+                  <input type="time" id="setting-briefing-time" class="form-input" value="08:00">
+                </div>
               </div>
             </div>
 
@@ -683,6 +726,50 @@
               <span id="settings-save-status" class="save-status-msg"></span>
             </div>
           </form>
+
+          <!-- Section 5: Data Clearance & Danger Zone -->
+          <div class="form-section mt-5" style="border-top: 1px solid var(--border); padding-top: 24px;">
+            <h4 style="color: var(--danger, #ef4444);">5. Data Management & System Clearance</h4>
+            <p class="text-muted" style="font-size: 13px; margin-bottom: 16px;">
+              Select components to clear or perform a full factory reset. Useful for disconnecting WhatsApp, clearing test chats, or restarting clean.
+            </p>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 20px;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                <input type="checkbox" id="clear-opt-chats" checked> Clear WhatsApp Chats
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                <input type="checkbox" id="clear-opt-emails" checked> Clear Stored Email Summaries
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                <input type="checkbox" id="clear-opt-drafts" checked> Clear Email Drafts
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                <input type="checkbox" id="clear-opt-schedules" checked> Clear Schedules & Meetings
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                <input type="checkbox" id="clear-opt-briefings"> Clear PDF Briefings
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                <input type="checkbox" id="clear-opt-logs"> Clear Activity Logs
+              </label>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+              <button type="button" class="btn btn-warning" onclick="executeClearSelectedData()">
+                Clear Selected Data
+              </button>
+              <button type="button" class="btn btn-outline" onclick="disconnectWhatsApp('director')">
+                Disconnect Director WhatsApp
+              </button>
+              <button type="button" class="btn btn-outline" onclick="disconnectWhatsApp('bot')">
+                Disconnect Bot WhatsApp
+              </button>
+              <button type="button" class="btn btn-danger" onclick="executeFullSystemReset()">
+                ⚠️ Full Reset / Wipe All Data
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 

@@ -17,7 +17,9 @@ import {
   getWhatsAppStatus,
   setSocketIO,
   triggerDailyBriefing,
-  sendTestPing
+  sendTestPing,
+  disconnectDirectorSession,
+  disconnectBotSession
 } from './src/whatsapp/baileysManager.js';
 
 dotenv.config();
@@ -286,7 +288,107 @@ app.get('/api/whatsapp/chats', async (req, res) => {
   }
 });
 
-// 7. Executive Briefing Generation
+// 7. WhatsApp Disconnect Endpoints
+app.post('/api/whatsapp/disconnect/director', async (req, res) => {
+  try {
+    const result = await disconnectDirectorSession();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/disconnect/bot', async (req, res) => {
+  try {
+    const result = await disconnectBotSession();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 8. Data Clearing & System Reset
+app.post('/api/system/clear-data', async (req, res) => {
+  try {
+    const {
+      clearChats,
+      clearEmails,
+      clearDrafts,
+      clearSchedules,
+      clearLogs,
+      clearBriefings,
+      disconnectDirector,
+      disconnectBot,
+      clearGoogle,
+      clearPhones
+    } = req.body;
+
+    const clearedItems = [];
+
+    if (clearChats) {
+      await query('TRUNCATE TABLE whatsapp_chats');
+      clearedItems.push('WhatsApp chats');
+    }
+
+    if (clearEmails) {
+      await query('TRUNCATE TABLE email_summaries');
+      clearedItems.push('Email summaries');
+    }
+
+    if (clearDrafts) {
+      await query('TRUNCATE TABLE email_drafts');
+      clearedItems.push('Email drafts');
+    }
+
+    if (clearSchedules) {
+      await query('TRUNCATE TABLE schedules');
+      clearedItems.push('Schedules');
+    }
+
+    if (clearLogs) {
+      await query('TRUNCATE TABLE activity_logs');
+      clearedItems.push('Activity logs');
+    }
+
+    if (clearBriefings) {
+      const dir = path.join(__dirname, 'storage/briefings');
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        for (const f of files) {
+          try { fs.unlinkSync(path.join(dir, f)); } catch (e) {}
+        }
+      }
+      clearedItems.push('Briefing PDFs');
+    }
+
+    if (clearPhones) {
+      await query("DELETE FROM system_settings WHERE `key_name` IN ('DIRECTOR_PHONE', 'PA_PHONE')");
+      clearedItems.push('Director and PA phone numbers');
+    }
+
+    if (clearGoogle) {
+      await disconnectGmail();
+      clearedItems.push('Google Account');
+    }
+
+    if (disconnectDirector) {
+      await disconnectDirectorSession();
+      clearedItems.push('Director WhatsApp session');
+    }
+
+    if (disconnectBot) {
+      await disconnectBotSession();
+      clearedItems.push('Bot WhatsApp session');
+    }
+
+    await logActivity('SYSTEM_RESET', `System data reset: ${clearedItems.join(', ')}`, 'WARN');
+    res.json({ success: true, message: clearedItems.join(', ') || 'No data selected' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 9. Executive Briefing Generation & Streaming API
 app.post('/api/briefing/generate', async (req, res) => {
   try {
     const result = await triggerDailyBriefing();
@@ -296,6 +398,29 @@ app.post('/api/briefing/generate', async (req, res) => {
   }
 });
 
+app.get('/api/briefing/list', (req, res) => {
+  const dir = path.join(__dirname, 'storage/briefings');
+  if (!fs.existsSync(dir)) return res.json([]);
+
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.pdf'));
+  files.sort().reverse();
+
+  const list = files.map(file => {
+    const filePath = path.join(dir, file);
+    const stats = fs.statSync(filePath);
+    return {
+      filename: file,
+      sizeBytes: stats.size,
+      sizeFormatted: `${(stats.size / 1024).toFixed(1)} KB`,
+      mtime: stats.mtime,
+      viewUrl: `/api/briefing/view/${encodeURIComponent(file)}`,
+      downloadUrl: `/api/briefing/download/${encodeURIComponent(file)}`
+    };
+  });
+
+  res.json(list);
+});
+
 app.get('/api/briefing/latest', (req, res) => {
   const dir = path.join(__dirname, 'storage/briefings');
   if (!fs.existsSync(dir)) return res.json({ available: false });
@@ -303,14 +428,44 @@ app.get('/api/briefing/latest', (req, res) => {
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.pdf'));
   if (files.length === 0) return res.json({ available: false });
 
-  // Get most recent
   files.sort().reverse();
   const latestFile = files[0];
+  const stats = fs.statSync(path.join(dir, latestFile));
+
   res.json({
     available: true,
     filename: latestFile,
-    url: `/storage/briefings/${latestFile}`
+    sizeFormatted: `${(stats.size / 1024).toFixed(1)} KB`,
+    viewUrl: `/api/briefing/view/${encodeURIComponent(latestFile)}`,
+    downloadUrl: `/api/briefing/download/${encodeURIComponent(latestFile)}`,
+    url: `/api/briefing/view/${encodeURIComponent(latestFile)}`
   });
+});
+
+app.get('/api/briefing/view/:filename', (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(__dirname, 'storage/briefings', filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Briefing PDF file not found.');
+  }
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  const stream = fs.createReadStream(filePath);
+  stream.pipe(res);
+});
+
+app.get('/api/briefing/download/:filename', (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(__dirname, 'storage/briefings', filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Briefing PDF file not found.');
+  }
+
+  res.download(filePath, filename);
 });
 
 // 8. Settings Management

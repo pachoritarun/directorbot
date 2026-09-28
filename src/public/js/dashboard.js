@@ -79,7 +79,10 @@ function switchTab(tabId) {
   if (tabId === 'tab-drafts') loadDrafts();
   if (tabId === 'tab-schedule') loadSchedules();
   if (tabId === 'tab-whatsapp-chats') loadWhatsAppChats();
-  if (tabId === 'tab-briefings') loadLatestBriefing();
+  if (tabId === 'tab-briefings') {
+    loadLatestBriefing();
+    loadBriefingArchives();
+  }
   if (tabId === 'tab-settings') loadSettings();
 }
 
@@ -396,20 +399,78 @@ async function loadLatestBriefing() {
     const downloadContainer = document.getElementById('briefing-download-container');
 
     if (data.available) {
+      const viewUrl = data.viewUrl || data.url;
+      const downloadUrl = data.downloadUrl || data.url;
+
       downloadContainer.innerHTML = `
-        <a href="${data.url}" download="${data.filename}" class="btn btn-sm btn-outline">
+        <a href="${viewUrl}" target="_blank" class="btn btn-sm btn-primary">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Open in New Tab
+        </a>
+        <a href="${downloadUrl}" download="${data.filename}" class="btn btn-sm btn-outline">
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download PDF (${data.filename})
+          Download PDF (${data.sizeFormatted || data.filename})
         </a>
       `;
+
       container.innerHTML = `
-        <div style="height: 600px; width: 100%;">
-          <iframe src="${data.url}" style="width: 100%; height: 100%; border: none; border-radius: 8px;"></iframe>
+        <div style="height: 750px; width: 100%;">
+          <object data="${viewUrl}" type="application/pdf" style="width: 100%; height: 100%; border: none; border-radius: 8px;">
+            <div class="empty-state" style="padding: 40px;">
+              <p>Your browser could not embed the PDF preview directly.</p>
+              <div style="margin-top: 12px; display:flex; gap:10px; justify-content:center;">
+                <a href="${viewUrl}" target="_blank" class="btn btn-primary">View PDF in Fullscreen Tab</a>
+                <a href="${downloadUrl}" class="btn btn-outline">Download PDF</a>
+              </div>
+            </div>
+          </object>
+        </div>
+      `;
+    } else {
+      downloadContainer.innerHTML = '';
+      container.innerHTML = `
+        <div class="empty-state">
+          <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <p>No briefing generated yet for today.</p>
+          <button class="btn btn-primary mt-3" onclick="generateAndSendBriefingNow()">Create Today's Briefing PDF</button>
         </div>
       `;
     }
   } catch (err) {
     console.error('Failed to load briefing:', err);
+  }
+}
+
+async function loadBriefingArchives() {
+  const tbody = document.getElementById('briefings-history-table-body');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/api/briefing/list');
+    const list = await res.json();
+
+    if (!list || list.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center" style="padding:24px; color:var(--text-muted);">No archived briefings found. Click "Generate & Dispatch Today's PDF" to produce the first brief.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = list.map(item => {
+      const dateFormatted = item.mtime ? new Date(item.mtime).toLocaleString() : 'Recent';
+      return `
+        <tr>
+          <td><b>${item.filename}</b></td>
+          <td>${item.sizeFormatted}</td>
+          <td>${dateFormatted}</td>
+          <td>
+            <a href="${item.viewUrl}" target="_blank" class="btn btn-xs btn-outline">View</a>
+            <a href="${item.downloadUrl}" download="${item.filename}" class="btn btn-xs btn-outline">Download</a>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load briefing archive list:', err);
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Failed to load archive list</td></tr>`;
   }
 }
 
@@ -545,6 +606,7 @@ async function loadSettings() {
     if (s.GOOGLE_CLIENT_SECRET) document.getElementById('setting-google-secret').value = s.GOOGLE_CLIENT_SECRET;
     if (s.DIRECTOR_PHONE) document.getElementById('setting-director-phone').value = s.DIRECTOR_PHONE;
     if (s.PA_PHONE) document.getElementById('setting-pa-phone').value = s.PA_PHONE;
+    if (s.DIRECTOR_NAME) document.getElementById('setting-director-name').value = s.DIRECTOR_NAME;
     if (s.ORGANIZATION_NAME) document.getElementById('setting-org-name').value = s.ORGANIZATION_NAME;
     if (s.DIRECTOR_TITLE) document.getElementById('setting-director-title').value = s.DIRECTOR_TITLE;
     if (s.BRIEFING_TIME) document.getElementById('setting-briefing-time').value = s.BRIEFING_TIME;
@@ -564,6 +626,7 @@ function setupSettingsForm() {
       GOOGLE_CLIENT_SECRET: document.getElementById('setting-google-secret').value,
       DIRECTOR_PHONE: document.getElementById('setting-director-phone').value,
       PA_PHONE: document.getElementById('setting-pa-phone').value,
+      DIRECTOR_NAME: document.getElementById('setting-director-name')?.value || '',
       ORGANIZATION_NAME: document.getElementById('setting-org-name').value,
       DIRECTOR_TITLE: document.getElementById('setting-director-title').value,
       BRIEFING_TIME: document.getElementById('setting-briefing-time').value
@@ -584,6 +647,113 @@ function setupSettingsForm() {
       showToast('Failed to save settings');
     }
   });
+}
+
+async function disconnectWhatsApp(sessionType) {
+  const label = sessionType === 'director' ? 'Director WhatsApp' : 'Bot WhatsApp';
+  if (!confirm(`Are you sure you want to disconnect ${label}? This will purge session credentials and generate a fresh pairing QR code.`)) {
+    return;
+  }
+
+  showToast(`Disconnecting ${label}...`);
+  try {
+    const res = await fetch(`/api/whatsapp/disconnect/${sessionType}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`${label} disconnected. Generating new QR...`);
+      loadStatus();
+    } else {
+      showToast(`Disconnect failed: ${data.error || 'Server error'}`);
+    }
+  } catch (err) {
+    showToast(`Network error disconnecting ${label}`);
+  }
+}
+
+async function executeClearSelectedData() {
+  const clearChats = document.getElementById('clear-opt-chats')?.checked;
+  const clearEmails = document.getElementById('clear-opt-emails')?.checked;
+  const clearDrafts = document.getElementById('clear-opt-drafts')?.checked;
+  const clearSchedules = document.getElementById('clear-opt-schedules')?.checked;
+  const clearBriefings = document.getElementById('clear-opt-briefings')?.checked;
+  const clearLogs = document.getElementById('clear-opt-logs')?.checked;
+
+  if (!clearChats && !clearEmails && !clearDrafts && !clearSchedules && !clearBriefings && !clearLogs) {
+    showToast('Please select at least one item to clear.');
+    return;
+  }
+
+  if (!confirm('Are you sure you want to clear the selected records? This cannot be undone.')) {
+    return;
+  }
+
+  showToast('Clearing selected data records...');
+  try {
+    const res = await fetch('/api/system/clear-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clearChats,
+        clearEmails,
+        clearDrafts,
+        clearSchedules,
+        clearBriefings,
+        clearLogs
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Data cleared: ' + data.message);
+      loadStats();
+      if (clearEmails) loadEmails();
+      if (clearDrafts) loadDrafts();
+      if (clearSchedules) loadSchedules();
+      if (clearChats) loadWhatsAppChats();
+      if (clearBriefings) {
+        loadLatestBriefing();
+        loadBriefingArchives();
+      }
+    } else {
+      showToast('Clear failed: ' + (data.error || 'Server error'));
+    }
+  } catch (err) {
+    showToast('Network error during data clearance');
+  }
+}
+
+async function executeFullSystemReset() {
+  const confirmation = prompt('DANGER ZONE: Type "RESET" in all caps to confirm wiping all stored chats, emails, drafts, schedules, briefings, and WhatsApp sessions:');
+  if (confirmation !== 'RESET') {
+    if (confirmation !== null) showToast('Reset cancelled. You must type "RESET" to confirm.');
+    return;
+  }
+
+  showToast('Initiating complete system wipe and reset...');
+  try {
+    const res = await fetch('/api/system/clear-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clearChats: true,
+        clearEmails: true,
+        clearDrafts: true,
+        clearSchedules: true,
+        clearLogs: true,
+        clearBriefings: true,
+        disconnectDirector: true,
+        disconnectBot: true
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Full system wipe completed! Reloading dashboard in 2s...');
+      setTimeout(() => window.location.reload(), 2000);
+    } else {
+      showToast('Reset failed: ' + (data.error || 'Server error'));
+    }
+  } catch (err) {
+    showToast('Network error during full system reset');
+  }
 }
 
 function checkUrlParams() {

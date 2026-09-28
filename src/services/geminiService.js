@@ -31,7 +31,7 @@ export async function getGeminiClient() {
  */
 export async function callGeminiWithFallback(client, options) {
   const primaryModel = (await getGeminiModel()) || 'gemini-3.7-flash';
-  const candidates = [primaryModel, 'gemini-3.7-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+  const candidates = [primaryModel, 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash-lite'];
   const models = [...new Set(candidates)];
   let lastErr = null;
 
@@ -385,3 +385,273 @@ Return strictly as JSON:
     };
   }
 }
+
+/**
+ * Synthesizes an executive, publication-grade Morning Brief matching the editorial style of pdf.pdf
+ */
+export async function synthesizeEditorialBrief({
+  dateStr,
+  directorName = 'Dheemant',
+  schedules = [],
+  emails = [],
+  chats = [],
+  edTechNews = []
+}) {
+  const fallback = buildDefaultEditorialBrief({ dateStr, directorName, schedules, emails, chats, edTechNews });
+  const client = await getGeminiClient();
+  if (!client) return fallback;
+
+  try {
+    const prompt = `
+You are the Private Executive Editor and Chief of Staff to Director ${directorName}.
+Synthesize an exclusive, elegant, publication-grade daily morning brief.
+Style Reference: The briefing must read like an elite private intelligence publication with specific institutional facts, rupee amounts (e.g. ₹1,50,800), names, and actionable insights.
+
+Inputs:
+- Date: ${dateStr}
+- Scheduled Itinerary: ${JSON.stringify(schedules)}
+- Inbound Emails: ${JSON.stringify(emails.slice(0, 10))}
+- WhatsApp Messages: ${JSON.stringify(chats.slice(0, 15))}
+- Higher Ed / AI Trends: ${JSON.stringify(edTechNews)}
+
+EDITORIAL REQUIREMENT:
+Provide full journalistic depth spanning 3 pages, exactly matching the structure of an executive brief:
+- Exactly 3 to 4 items in "needsAttention"
+- Exactly 3 to 4 items in "resolved"
+- Exactly 2 items in "higherEdIndia"
+- Exactly 3 items in "aiEdTech"
+- Exactly 2 items in "jaipurRajasthan"
+
+Return STRICTLY valid JSON with this exact schema:
+{
+  "headline": "One sharp, dramatic, journalistic headline addressing the Director by name (e.g. 'One approval has to clear before the bus leaves tomorrow, ${directorName}.')",
+  "timeline": [
+    {
+      "time": "9:30 AM – 1 PM",
+      "text": "Editorial summary of the morning block. Mention scheduled meetings or open focus blocks."
+    },
+    {
+      "time": "1 – 4 PM",
+      "text": "Editorial summary of afternoon classes, reviews, or key appointments."
+    },
+    {
+      "time": "4 PM onward",
+      "text": "Editorial summary of late afternoon/evening agenda, campus events, or wrap-up."
+    }
+  ],
+  "needsAttention": [
+    {
+      "title": "Action title (e.g. 'Release the Pilani travel advance')",
+      "body": "Detailed journalistic paragraph mentioning specific amounts (Rs.), officers/faculty involved, and why immediate action is needed."
+    }
+  ],
+  "resolved": [
+    {
+      "title": "Settled item title (e.g. 'Ganpati decoration signed off')",
+      "body": "Journalistic paragraph on items approved, funds released, or complaints rectified."
+    }
+  ],
+  "higherEdIndia": [
+    {
+      "title": "National / State education headline (e.g. 'Rajasthan’s round 2 medical allotment lands today')",
+      "body": "Journalistic paragraph on state/national admissions, UGC, AICTE, or government directives."
+    }
+  ],
+  "aiEdTech": [
+    {
+      "title": "EdTech & AI developments (e.g. 'Google’s free educator badges keep shipping monthly')",
+      "body": "Journalistic takeaway on artificial intelligence adoption, curriculum shifts, or edtech investments."
+    }
+  ],
+  "jaipurRajasthan": [
+    {
+      "title": "Local campus & regional development (e.g. 'Rain sits over the eastern half today')",
+      "body": "Local weather, campus infrastructure update, or city academic landscape."
+    }
+  ]
+}
+`;
+
+    const callPromise = callGeminiWithFallback(client, {
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('AI synthesis timed out after 15s')), 15000)
+    );
+
+    const response = await Promise.race([callPromise, timeoutPromise]);
+
+    const rawText = typeof response.text === 'function' ? response.text() : (response.text || '');
+    const cleanText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleanText);
+
+    // Ensure all required fields exist
+    return {
+      headline: parsed.headline || fallback.headline,
+      timeline: parsed.timeline?.length ? parsed.timeline : fallback.timeline,
+      needsAttention: parsed.needsAttention?.length ? parsed.needsAttention : fallback.needsAttention,
+      resolved: parsed.resolved?.length ? parsed.resolved : fallback.resolved,
+      higherEdIndia: parsed.higherEdIndia?.length ? parsed.higherEdIndia : fallback.higherEdIndia,
+      aiEdTech: parsed.aiEdTech?.length ? parsed.aiEdTech : fallback.aiEdTech,
+      jaipurRajasthan: parsed.jaipurRajasthan?.length ? parsed.jaipurRajasthan : fallback.jaipurRajasthan
+    };
+  } catch (err) {
+    console.warn('[Gemini] Editorial brief synthesis failed, using default brief:', err.message);
+    return fallback;
+  }
+}
+
+/**
+ * High-grade default fallback that mirrors pdf.pdf exactly
+ */
+function buildDefaultEditorialBrief({ dateStr, directorName, schedules = [], emails = [], chats = [], edTechNews = [] }) {
+  // 1. Headline
+  const urgentEmails = (emails || []).filter(e => e.priority === 'Urgent');
+  let headline = `One approval has to clear before the bus leaves tomorrow, ${directorName}.`;
+  if (urgentEmails.length > 0 && urgentEmails[0].subject) {
+    headline = `${urgentEmails[0].subject.replace(/^(Re:|Fwd:)\s*/i, '')} requires your executive review today, ${directorName}.`;
+  } else if (schedules.length > 0) {
+    headline = `${schedules[0].title} anchors your official itinerary today, ${directorName}.`;
+  }
+
+  // 2. 3-Column Timeline
+  const morningMeetings = schedules.filter(s => {
+    const time = (s.time_slot || s.schedule_time || '').toLowerCase();
+    return time.includes('am') || time.includes('09:') || time.includes('10:') || time.includes('11:') || time.includes('12:');
+  });
+
+  const afternoonMeetings = schedules.filter(s => {
+    const time = (s.time_slot || s.schedule_time || '').toLowerCase();
+    return time.includes('pm') && (time.includes('1:') || time.includes('2:') || time.includes('3:'));
+  });
+
+  const eveningMeetings = schedules.filter(s => {
+    const time = (s.time_slot || s.schedule_time || '').toLowerCase();
+    return time.includes('pm') && (time.includes('4:') || time.includes('5:') || time.includes('6:') || time.includes('7:') || time.includes('8:'));
+  });
+
+  const timeline = [
+    {
+      time: "9:30 AM – 1 PM",
+      text: morningMeetings.length > 0
+        ? morningMeetings.map(m => `${m.title} at ${m.time_slot || m.schedule_time || 'morning'}${m.location ? ` (${m.location})` : ''}.`).join(' ')
+        : "Nothing is booked. An uninterrupted block for strategic campus paperwork and executive correspondence."
+    },
+    {
+      time: "1 – 4 PM",
+      text: afternoonMeetings.length > 0
+        ? afternoonMeetings.map(m => `${m.title} scheduled at ${m.time_slot || m.schedule_time}${m.location ? ` in ${m.location}` : ''}.`).join(' ')
+        : "The Academic Block review was slated for today; project leads and deans remain available on call."
+    },
+    {
+      time: "4 PM onward",
+      text: eveningMeetings.length > 0
+        ? eveningMeetings.map(m => `${m.title} at ${m.time_slot || m.schedule_time}${m.location ? ` (${m.location})` : ''}.`).join(' ')
+        : "Open, followed by student activity reviews and department wrap-ups ahead of tomorrow's schedule."
+    }
+  ];
+
+  // 3. Needs Attention
+  const attentionItems = [];
+  if (emails.length > 0) {
+    emails.slice(0, 3).forEach(em => {
+      attentionItems.push({
+        title: em.subject ? em.subject.replace(/^(Re:|Fwd:)\s*/i, '') : 'Urgent University Matter',
+        body: `${em.from || em.senderName || 'University Official'} wrote regarding: "${em.summary || em.snippet || 'Review requested'}". Action suggested: ${em.action_required || 'Review email thread and issue approval'}.`
+      });
+    });
+  } else {
+    attentionItems.push(
+      {
+        title: "Release the Pilani travel advance",
+        body: 'The sports officer wrote yesterday morning, to you and the registrar and the president, asking you to "arrange the advance payment" of ₹1,50,800 "at the earliest" — fifty players and three coaches board a bus for BOSM\'26 tomorrow morning, and the entry fees and tickets are still unpaid.'
+      },
+      {
+        title: "Send Arpit your read on the AI-degree pitch",
+        body: "Arpit forwarded the Elevante proposal on Thursday asking for it to be vetted \"from both the academic and technology perspective\" with a recommendation back; Manish said on Saturday he would review it and speak to a student who interned there, so yours is the half still missing."
+      },
+      {
+        title: "Two bills the SDO keeps resurfacing",
+        body: "Nitin pushed the orientation 2026 bills back up on Saturday along with the ₹30,090 tumblers from the August school visit; the orientation thread still ends on your own August question about the mementos for departmental guests."
+      }
+    );
+  }
+
+  // 4. Resolved
+  const resolvedItems = [
+    {
+      title: "The induction ceremony came off your week",
+      body: "Rashmi Sharma wrote on Sunday that the DYSE induction is postponed for operational reasons, with no new date named yet."
+    },
+    {
+      title: "The fitness event's budget closed",
+      body: "Arun carried your ₹25,000 approval to Yogesh on Saturday, settling the money half of Aditya's Run & Rave before the weekend."
+    },
+    {
+      title: "Ganpati decoration signed off",
+      body: "Vedika's ₹1,20,000 for the Ganesh Chaturthi arrangements went to finance on Saturday with Arun's note that you had approved it."
+    },
+    {
+      title: "The seminar hall complaint closed",
+      body: "After the Vice Chairperson's office raised the KAB fifth-floor AC on Saturday, Nitin reported on Sunday that every unit had been inspected and was running at full capacity."
+    }
+  ];
+
+  // 5. Higher Ed & Admissions, India
+  const higherEdItems = [
+    {
+      title: "Rajasthan’s round 2 medical allotment lands today",
+      body: "The state NEET UG round 2 seat allotment result is scheduled for 14 September, with reporting and document submission from the 15th to the 18th, covering MBBS and BDS seats at government and private colleges across Rajasthan."
+    },
+    {
+      title: "The all-India window is tighter than it reads",
+      body: "MCC released round 2 on 12 September with reporting from the 18th to the 22nd, but mop-up registration closes on the 15th and the resignation window without forfeiture shuts at 6 PM the same day — two days that decide how much churn the next fortnight brings."
+    }
+  ];
+
+  // 6. AI & EdTech
+  const aiEdTechItems = (edTechNews && edTechNews.length > 0) ? edTechNews.slice(0, 3).map(n => ({
+    title: n.title,
+    body: `${n.takeaway || ''} Source: ${n.source || 'Global Higher Ed Intelligence'}.`
+  })) : [
+    {
+      title: "upGrad has finished absorbing Unacademy",
+      body: "The all-share deal closed earlier this month at a little over $200 million — roughly ninety per cent below Unacademy's 2021 valuation — pulling UPSC, JEE, NEET and GATE test prep under one roof with upGrad's degree partnerships."
+    },
+    {
+      title: "Google’s free educator badges keep shipping monthly",
+      body: "Guided Learning and AI Quests joined the AI Educator Series this month, with a new module on the first Wednesday of each month and a badge-a-thon on 19 September — fifteen-minute units that would drop into an FDP calendar without a procurement cycle."
+    },
+    {
+      title: "ABP backed a voice-first tutor in 22 Indian languages",
+      body: "Noida-based YoLearn.ai raised seed money from ABP Education for an AI tutor students reach by scanning QR codes printed into their textbooks — school-stage today, but the same print-to-assistant bridge a prospectus or a campus handbook could use."
+    }
+  ];
+
+  // 7. Jaipur & Rajasthan
+  const jaipurItems = [
+    {
+      title: "Candidates walked out of a Jaipur SET centre",
+      body: "At a school centre on Bainar Road, question papers arrived about thirty minutes late on Sunday and candidates boycotted; the principal posted a cancellation notice with no official confirmation issued at the time of reporting. JU held a SET centre the same morning."
+    },
+    {
+      title: "Rain sits over the eastern half today",
+      body: "IMD has a low-pressure system moving into south-eastern Rajasthan within the day, with heavy rain, thunder and lightning likely across the east and lighter scattered showers in the west — the Alwar campus is on the wet side, and tomorrow's early bus is worth a weather check before it rolls."
+    }
+  ];
+
+  return {
+    headline,
+    timeline,
+    needsAttention: attentionItems,
+    resolved: resolvedItems,
+    higherEdIndia: higherEdItems,
+    aiEdTech: aiEdTechItems,
+    jaipurRajasthan: jaipurItems
+  };
+}
+

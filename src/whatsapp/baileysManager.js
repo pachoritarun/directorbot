@@ -27,6 +27,9 @@ let botQR = null;
 let directorStatus = 'DISCONNECTED';
 let botStatus = 'DISCONNECTED';
 
+let isManualDisconnectDirector = false;
+let isManualDisconnectBot = false;
+
 let ioInstance = null;
 
 export function setSocketIO(io) {
@@ -82,6 +85,7 @@ export async function startDirectorSession() {
     }
 
     if (connection === 'close') {
+      if (isManualDisconnectDirector) return;
       const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
       directorStatus = 'DISCONNECTED';
       emitStatus();
@@ -171,6 +175,7 @@ export async function startBotSession() {
     }
 
     if (connection === 'close') {
+      if (isManualDisconnectBot) return;
       const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
       botStatus = 'DISCONNECTED';
       emitStatus();
@@ -649,3 +654,70 @@ export async function sendTestPing(targetPhone) {
   });
   return true;
 }
+
+export async function disconnectDirectorSession() {
+  isManualDisconnectDirector = true;
+  try {
+    if (directorSock) {
+      try { await directorSock.logout(); } catch (e) {}
+      try { directorSock.end(new Error('Manual Disconnect')); } catch (e) {}
+      directorSock = null;
+    }
+  } catch (err) {
+    console.warn('[Director WA] Disconnect error:', err.message);
+  }
+
+  directorStatus = 'DISCONNECTED';
+  directorQR = null;
+  emitStatus();
+
+  // Purge auth storage folder
+  const authDir = path.join(__dirname, '../../storage/auth_director');
+  if (fs.existsSync(authDir)) {
+    fs.rmSync(authDir, { recursive: true, force: true });
+  }
+
+  await logActivity('DIRECTOR_WA', 'Director WhatsApp session disconnected and credentials cleared', 'INFO');
+
+  // Re-initialize fresh session after brief delay to generate a new QR
+  setTimeout(() => {
+    isManualDisconnectDirector = false;
+    startDirectorSession().catch(e => console.error('[Director WA] Re-init error:', e));
+  }, 1200);
+
+  return { success: true, message: 'Director WhatsApp session disconnected.' };
+}
+
+export async function disconnectBotSession() {
+  isManualDisconnectBot = true;
+  try {
+    if (botSock) {
+      try { await botSock.logout(); } catch (e) {}
+      try { botSock.end(new Error('Manual Disconnect')); } catch (e) {}
+      botSock = null;
+    }
+  } catch (err) {
+    console.warn('[Bot WA] Disconnect error:', err.message);
+  }
+
+  botStatus = 'DISCONNECTED';
+  botQR = null;
+  emitStatus();
+
+  // Purge auth storage folder
+  const authDir = path.join(__dirname, '../../storage/auth_bot');
+  if (fs.existsSync(authDir)) {
+    fs.rmSync(authDir, { recursive: true, force: true });
+  }
+
+  await logActivity('BOT_WA', 'Bot WhatsApp session disconnected and credentials cleared', 'INFO');
+
+  // Re-initialize fresh session after brief delay to generate a new QR
+  setTimeout(() => {
+    isManualDisconnectBot = false;
+    startBotSession().catch(e => console.error('[Bot WA] Re-init error:', e));
+  }, 1200);
+
+  return { success: true, message: 'Bot WhatsApp session disconnected.' };
+}
+
