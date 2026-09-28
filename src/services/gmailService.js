@@ -234,3 +234,10 @@ export async function getGmailStatus() {
     lastSync: null
   };
 }
+
+export async function disconnectGmail() {
+  await query('DELETE FROM google_tokens');
+  await query('DELETE FROM system_settings WHERE key_name = "DIRECTOR_EMAIL"');
+  await logActivity('GMAIL', 'Director Gmail disconnected/unlinked via Dashboard', 'WARN');
+  return true;
+}

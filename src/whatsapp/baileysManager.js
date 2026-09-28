@@ -476,3 +476,13 @@ export function getWhatsAppStatus() {
     bot: { status: botStatus, qr: botQR }
   };
 }
+
+export async function sendTestPing(targetPhone) {
+  if (!botSock) throw new Error('Executive Bot WhatsApp is not connected yet. Please scan QR.');
+  const clean = targetPhone.replace(/[^0-9]/g, '');
+  const jid = `${clean}@s.whatsapp.net`;
+  await botSock.sendMessage(jid, {
+    text: `🧪 *EXECUTIVE ASSISTANT DIAGNOSTIC PING*\n\n✅ Test message from Executive AI Command Hub.\n🕒 Time: ${new Date().toLocaleTimeString()}\n📡 Status: WhatsApp & Baileys Pipeline Operational.`
+  });
+  return true;
+}

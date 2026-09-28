@@ -8,15 +8,16 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 import { initDatabase, query, getSetting, setSetting, logActivity, getDbStatus } from './src/database/db.js';
-import { getAuthUrl, handleOAuthCallback, getGmailStatus, fetchUnreadEmails, sendVerifiedEmail } from './src/services/gmailService.js';
-import { analyzeEmails, getGeminiClient } from './src/services/geminiService.js';
+import { getAuthUrl, handleOAuthCallback, getGmailStatus, fetchUnreadEmails, sendVerifiedEmail, disconnectGmail } from './src/services/gmailService.js';
+import { analyzeEmails, getGeminiClient, getGeminiModel } from './src/services/geminiService.js';
 import { addSchedule, getSchedulesByDate, deleteSchedule, getUpcomingSchedules } from './src/services/scheduleService.js';
 import {
   startDirectorSession,
   startBotSession,
   getWhatsAppStatus,
   setSocketIO,
-  triggerDailyBriefing
+  triggerDailyBriefing,
+  sendTestPing
 } from './src/whatsapp/baileysManager.js';
 
 dotenv.config();
@@ -60,6 +61,49 @@ app.get('/auth/google/callback', async (req, res) => {
     res.redirect(`/?auth=success&email=${encodeURIComponent(result.email)}`);
   } catch (err) {
     res.redirect(`/?auth=error&msg=${encodeURIComponent(err.message)}`);
+  }
+});
+
+// Disconnect Google Account
+app.post('/api/gmail/disconnect', async (req, res) => {
+  try {
+    await disconnectGmail();
+    res.json({ success: true, message: 'Google account disconnected successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Diagnostic / Test Endpoints
+app.post('/api/test/gemini', async (req, res) => {
+  try {
+    const client = await getGeminiClient();
+    if (!client) return res.status(400).json({ success: false, error: 'Gemini API key is not configured.' });
+    const model = await getGeminiModel();
+    const response = await client.models.generateContent({
+      model,
+      contents: 'Respond in 1 short sentence: "Executive AI Chief of Staff (Gemini 3.7 Flash) is operational."'
+    });
+    const text = typeof response.text === 'function' ? response.text() : (response.text || '');
+    res.json({ success: true, model, response: text.trim() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/test/whatsapp-ping', async (req, res) => {
+  try {
+    const { target } = req.body; // 'director' or 'pa'
+    const dirPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE;
+    const paPhone = (await getSetting('PA_PHONE')) || process.env.PA_PHONE;
+    
+    const phone = target === 'pa' ? paPhone : dirPhone;
+    if (!phone) return res.status(400).json({ success: false, error: `${target === 'pa' ? 'PA' : 'Director'} phone number is not configured in Settings.` });
+
+    await sendTestPing(phone);
+    res.json({ success: true, message: `Test WhatsApp ping dispatched to ${phone}` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

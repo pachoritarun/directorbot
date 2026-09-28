@@ -162,7 +162,7 @@ async function loadStatus() {
     // Gemini Status
     const geminiConfigured = data.gemini?.configured;
     document.getElementById('dot-gemini').className = geminiConfigured ? 'dot-online' : 'dot-online text-warning';
-    document.getElementById('gemini-desc').textContent = geminiConfigured ? 'Gemini 2.5 Active' : 'Key Needed';
+    document.getElementById('gemini-desc').textContent = geminiConfigured ? 'Gemini 3.7 Active' : 'Key Needed';
 
     // Gmail Status
     const gmailConnected = data.gmail?.connected;
@@ -171,19 +171,33 @@ async function loadStatus() {
     const gmailAddress = document.getElementById('gmail-connected-address');
     const gmailSub = document.getElementById('gmail-connected-sub');
 
+    const connectBtn = document.getElementById('btn-connect-gmail');
+    const overviewDisconnect = document.getElementById('btn-overview-disconnect-gmail');
+    const disconnectBtn = document.getElementById('btn-disconnect-gmail');
+    const reconnectBtn = document.getElementById('btn-reconnect-gmail');
+
     if (gmailConnected) {
       gmailPill.textContent = 'CONNECTED';
       gmailPill.className = 'status-indicator-pill connected';
       gmailText.textContent = `Connected: ${data.gmail.email}`;
       if (gmailAddress) gmailAddress.textContent = data.gmail.email;
-      if (gmailSub) gmailSub.textContent = `Last synchronized: ${new Date(data.gmail.lastSync).toLocaleTimeString()}`;
-      document.getElementById('btn-connect-gmail').style.display = 'none';
+      if (gmailSub) gmailSub.textContent = `Last synchronized: ${data.gmail.lastSync ? new Date(data.gmail.lastSync).toLocaleTimeString() : 'Active'}`;
+      
+      if (connectBtn) connectBtn.style.display = 'none';
+      if (overviewDisconnect) overviewDisconnect.style.display = 'inline-flex';
+      if (disconnectBtn) disconnectBtn.style.display = 'inline-flex';
+      if (reconnectBtn) reconnectBtn.textContent = 'Switch Account';
     } else {
       gmailPill.textContent = 'DISCONNECTED';
       gmailPill.className = 'status-indicator-pill action-needed';
       gmailText.textContent = 'Click "Connect with Google" to link Director\'s Gmail';
       if (gmailAddress) gmailAddress.textContent = 'No Gmail Connected';
       if (gmailSub) gmailSub.textContent = 'Authorize Director inbox to enable automatic email intelligence.';
+      
+      if (connectBtn) connectBtn.style.display = 'inline-flex';
+      if (overviewDisconnect) overviewDisconnect.style.display = 'none';
+      if (disconnectBtn) disconnectBtn.style.display = 'none';
+      if (reconnectBtn) reconnectBtn.textContent = 'Connect / Change Account';
     }
 
     // WhatsApp Status
@@ -597,4 +611,159 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+// ==================== GOOGLE ACCOUNT DISCONNECT ====================
+async function disconnectGmailAccount() {
+  if (!confirm('Are you sure you want to disconnect this Google Account? This will remove saved OAuth tokens and pause automatic email ingestion.')) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/gmail/disconnect', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Google account disconnected successfully.');
+      await loadStatus();
+      await loadStats();
+      await loadEmails();
+    } else {
+      showToast(`Error: ${data.error || 'Failed to disconnect'}`);
+    }
+  } catch (err) {
+    showToast(`Disconnect request failed: ${err.message}`);
+  }
+}
+
+// ==================== LIVE DIAGNOSTICS SUITE ====================
+
+// 1. Gemini AI Test
+async function runGeminiTest() {
+  const resultBox = document.getElementById('diag-gemini-result');
+  const btn = document.getElementById('btn-test-gemini');
+  resultBox.className = 'diag-output';
+  resultBox.textContent = 'Querying Gemini API...';
+  btn.disabled = true;
+
+  const startTime = Date.now();
+  try {
+    const res = await fetch('/api/test/gemini', { method: 'POST' });
+    const data = await res.json();
+    const duration = Date.now() - startTime;
+
+    if (data.success) {
+      resultBox.className = 'diag-output success';
+      resultBox.textContent = `[SUCCESS] (${duration}ms)\nModel: ${data.model}\nResponse:\n"${data.response}"`;
+      showToast('Gemini 3.7 Flash test passed!');
+    } else {
+      resultBox.className = 'diag-output error';
+      resultBox.textContent = `[ERROR] Failed to query Gemini:\n${data.error}`;
+      showToast('Gemini test failed.');
+    }
+  } catch (err) {
+    resultBox.className = 'diag-output error';
+    resultBox.textContent = `[NETWORK ERROR]: ${err.message}`;
+    showToast('Failed to reach backend server.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 2. WhatsApp Bot Ping Test
+async function runWhatsAppPing(target) {
+  const resultBox = document.getElementById('diag-wa-result');
+  const btnDir = document.getElementById('btn-test-ping-dir');
+  const btnPa = document.getElementById('btn-test-ping-pa');
+  resultBox.className = 'diag-output';
+  resultBox.textContent = `Dispatching ping message to ${target.toUpperCase()} via WhatsApp Bot...`;
+  if (btnDir) btnDir.disabled = true;
+  if (btnPa) btnPa.disabled = true;
+
+  try {
+    const res = await fetch('/api/test/whatsapp-ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      resultBox.className = 'diag-output success';
+      resultBox.textContent = `[SUCCESS]\n${data.message}\nCheck the recipient's WhatsApp for the verification text!`;
+      showToast(`Ping sent to ${target === 'pa' ? 'PA' : 'Director'} WhatsApp!`);
+    } else {
+      resultBox.className = 'diag-output error';
+      resultBox.textContent = `[ERROR]\n${data.error}\n(Make sure Bot WhatsApp QR is scanned in Connectors tab and the number is saved in Settings)`;
+      showToast(`WhatsApp ping failed: ${data.error}`);
+    }
+  } catch (err) {
+    resultBox.className = 'diag-output error';
+    resultBox.textContent = `[NETWORK ERROR]: ${err.message}`;
+    showToast('Failed to reach server.');
+  } finally {
+    if (btnDir) btnDir.disabled = false;
+    if (btnPa) btnPa.disabled = false;
+  }
+}
+
+// 3. Gmail Sync & Urgency Test
+async function runGmailTest() {
+  const resultBox = document.getElementById('diag-gmail-result');
+  const btn = document.getElementById('btn-test-gmail');
+  resultBox.className = 'diag-output';
+  resultBox.textContent = 'Connecting to Gmail API and analyzing recent inbox messages...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/emails/sync', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultBox.className = 'diag-output success';
+      resultBox.textContent = `[SUCCESS]\nSynchronized and analyzed ${data.count} recent emails via Gemini 3.7 Flash!\nData saved to database and ready for briefings.`;
+      showToast(`Analyzed ${data.count} emails!`);
+      loadEmails();
+      loadStats();
+    } else {
+      resultBox.className = 'diag-output error';
+      resultBox.textContent = `[ERROR]\n${data.error}\n(Ensure Google account is connected in Overview or Gmail tab)`;
+      showToast('Gmail sync failed.');
+    }
+  } catch (err) {
+    resultBox.className = 'diag-output error';
+    resultBox.textContent = `[NETWORK ERROR]: ${err.message}`;
+    showToast('Failed to reach server.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 4. Sample PDF Briefing Test
+async function runBriefingTest() {
+  const resultBox = document.getElementById('diag-briefing-result');
+  const btn = document.getElementById('btn-test-briefing');
+  resultBox.className = 'diag-output';
+  resultBox.textContent = 'Generating daily PDF briefing and dispatching to Director...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/briefing/generate', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultBox.className = 'diag-output success';
+      resultBox.textContent = `[SUCCESS]\nBriefing PDF Generated: ${data.filename}\nDispatched to Director WhatsApp: ${data.dispatched ? 'YES' : 'No (check bot session)'}\nSaved to: storage/briefings/`;
+      showToast('Daily briefing PDF generated successfully!');
+      loadLatestBriefing();
+    } else {
+      resultBox.className = 'diag-output error';
+      resultBox.textContent = `[ERROR]\n${data.error || 'Failed to generate briefing'}`;
+      showToast('Failed to generate briefing.');
+    }
+  } catch (err) {
+    resultBox.className = 'diag-output error';
+    resultBox.textContent = `[NETWORK ERROR]: ${err.message}`;
+    showToast('Failed to reach server.');
+  } finally {
+    btn.disabled = false;
+  }
 }

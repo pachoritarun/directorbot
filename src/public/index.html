@@ -85,6 +85,11 @@
           Briefing Archive
         </button>
 
+        <button class="menu-item" data-tab="tab-diagnostics" id="nav-tab-diagnostics">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          Live Diagnostics
+        </button>
+
         <button class="menu-item" data-tab="tab-settings" id="nav-tab-settings">
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Settings & Keys
@@ -218,8 +223,9 @@
               </div>
               <span class="status-indicator-pill" id="gmail-status-pill">Checking...</span>
             </div>
-            <div class="connector-footer">
+            <div class="connector-footer" style="display:flex; gap:8px; align-items:center;">
               <a href="auth/google" id="btn-connect-gmail" class="btn btn-sm btn-primary">Connect with Google</a>
+              <button class="btn btn-sm btn-danger" id="btn-overview-disconnect-gmail" onclick="disconnectGmailAccount()" style="display:none;">Disconnect Account</button>
             </div>
           </div>
         </div>
@@ -331,7 +337,10 @@
               <p id="gmail-connected-sub">Click "Connect with Google" to authorize Director's official inbox.</p>
             </div>
           </div>
-          <a href="auth/google" class="btn btn-outline" id="btn-reconnect-gmail">Connect / Change Account</a>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <a href="auth/google" class="btn btn-outline" id="btn-reconnect-gmail">Connect / Change Account</a>
+            <button class="btn btn-danger" id="btn-disconnect-gmail" onclick="disconnectGmailAccount()" style="display:none;">Disconnect Account</button>
+          </div>
         </div>
 
         <div class="panel mt-4">
@@ -492,6 +501,103 @@
               <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
               <p>No briefing generated yet for today.</p>
               <button class="btn btn-primary mt-3" onclick="generateAndSendBriefingNow()">Create Today's Briefing PDF</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB: LIVE DIAGNOSTICS ==================== -->
+      <section class="tab-content" id="tab-diagnostics">
+        <div class="page-header">
+          <div>
+            <h2>Executive System Live Diagnostics & Test Bench</h2>
+            <p class="subtitle">1-Click sandbox to verify AI inferences, WhatsApp notifications, Gmail synchronization, and PDF generation</p>
+          </div>
+        </div>
+
+        <div class="grid-two-col">
+          <!-- Test 1: Gemini 3.7 Flash -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                1. Google Gemini 3.7 Flash AI Test
+              </div>
+              <span class="badge badge-info">Direct AI Inference</span>
+            </div>
+            <div class="panel-body">
+              <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:14px;">
+                Sends a rapid verification prompt to the configured Gemini 3.7 Flash API key to confirm model responsiveness and latency.
+              </p>
+              <button class="btn btn-primary btn-sm" id="btn-test-gemini" onclick="runGeminiTest()">
+                Run Gemini AI Test
+              </button>
+              <div id="diag-gemini-result" class="diag-output">Awaiting test trigger...</div>
+            </div>
+          </div>
+
+          <!-- Test 2: WhatsApp Bot Ping -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                2. WhatsApp Executive Bot Ping Test
+              </div>
+              <span class="badge badge-accent">Baileys Socket</span>
+            </div>
+            <div class="panel-body">
+              <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:14px;">
+                Dispatches a live verification message from your active Bot WhatsApp number to the Director or PA phone number.
+              </p>
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn btn-outline btn-sm" id="btn-test-ping-dir" onclick="runWhatsAppPing('director')">
+                  Ping Director Phone
+                </button>
+                <button class="btn btn-outline btn-sm" id="btn-test-ping-pa" onclick="runWhatsAppPing('pa')">
+                  Ping PA Phone
+                </button>
+              </div>
+              <div id="diag-wa-result" class="diag-output">Awaiting test trigger...</div>
+            </div>
+          </div>
+
+          <!-- Test 3: Gmail Sync & Urgency Classifier -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                3. Gmail Sync & Priority Test
+              </div>
+              <span class="badge badge-success">OAuth2 & AI</span>
+            </div>
+            <div class="panel-body">
+              <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:14px;">
+                Fetches latest messages from the linked Google account and runs AI urgency analysis (Urgent vs Routine).
+              </p>
+              <button class="btn btn-primary btn-sm" id="btn-test-gmail" onclick="runGmailTest()">
+                Sync & Test Gmail Inbox
+              </button>
+              <div id="diag-gmail-result" class="diag-output">Awaiting test trigger...</div>
+            </div>
+          </div>
+
+          <!-- Test 4: Executive PDF Briefing Generator -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                4. Sample PDF Briefing Dispatch Test
+              </div>
+              <span class="badge">PDFKit Engine</span>
+            </div>
+            <div class="panel-body">
+              <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:14px;">
+                Generates the branded Daily Morning PDF briefing right now and dispatches it directly to the Director via WhatsApp Bot.
+              </p>
+              <button class="btn btn-primary btn-sm" id="btn-test-briefing" onclick="runBriefingTest()">
+                Generate & Dispatch Sample PDF
+              </button>
+              <div id="diag-briefing-result" class="diag-output">Awaiting test trigger...</div>
             </div>
           </div>
         </div>
