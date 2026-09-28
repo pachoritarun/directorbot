@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { query, getSetting, logActivity } from '../database/db.js';
 import { handleDirectorChat, draftExecutiveEmail, analyzeEmails, summarizeWhatsAppChats, getEdTechAndAiNews } from '../services/geminiService.js';
 import { fetchUnreadEmails, sendVerifiedEmail, searchGmail } from '../services/gmailService.js';
-import { getSchedulesByDate, parseScheduleFromText } from '../services/scheduleService.js';
+import { getSchedulesByDate, parseScheduleFromText, parseScheduleIntentWithAI, addSchedule } from '../services/scheduleService.js';
 import { generateExecutiveBriefingPdf } from '../services/pdfService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -245,33 +245,69 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       return;
     }
 
-    // --- PA Commands & Authorization ---
+    // --- PA Commands & Natural AI Schedule Handling ---
     if (isPA && !isDirector) {
+      // 1. Check legacy prefix if PA typed "!schedule"
       if (text.startsWith('!schedule')) {
         const added = await parseScheduleFromText(text);
         await botSock.sendMessage(jid, {
           text: `✅ *Schedule Updated by PA:*\nAdded ${added.length} meeting(s) to Director's calendar for today.`
         });
         return;
-      } else {
-        // PA can check today's schedule
-        if (text.toLowerCase().includes('schedule') || text.toLowerCase().includes('meeting')) {
-          const todayStr = new Date().toISOString().split('T')[0];
-          const schedules = await getSchedulesByDate(todayStr);
-          const list = schedules.length > 0
-            ? schedules.map(s => `• *${s.time_slot}*: ${s.title} (${s.location})`).join('\n')
-            : 'No meetings scheduled for today.';
+      }
+
+      // 2. Intelligent AI Parsing for Natural PA messages (e.g. "Thoolle meeting tomorrow at 7 pm")
+      const parsedIntent = await parseScheduleIntentWithAI(text);
+      if (parsedIntent) {
+        if (parsedIntent.intent === 'ADD_MEETING' && parsedIntent.meeting) {
+          const m = parsedIntent.meeting;
+          const id = await addSchedule({
+            date: m.date || new Date().toISOString().split('T')[0],
+            time_slot: m.time_slot || 'TBD',
+            title: m.title || 'Scheduled Discussion',
+            description: m.description || '',
+            location: m.location || "Director's Office",
+            priority: m.priority || 'Normal',
+            created_by: 'PA via WhatsApp'
+          });
+
           await botSock.sendMessage(jid, {
-            text: `📅 *Director's Schedule for Today (${todayStr}):*\n\n${list}\n\n_To add a meeting, send: !schedule Time - Meeting Title_`
+            text: `✅ *Meeting Scheduled in Director's Calendar!*\n\n📅 *Date:* ${m.date}\n⏰ *Time:* ${m.time_slot}\n📌 *Agenda:* ${m.title}\n${m.description ? `📝 *Notes:* ${m.description}\n` : ''}⚠️ *Priority:* ${m.priority || 'Normal'}\n📍 *Location:* ${m.location || "Director's Office"}\n\n_Director's itinerary has been successfully updated!_`
           });
           return;
         }
-        // For any other text from PA, guide them
-        await botSock.sendMessage(jid, {
-          text: `Hello PA. You can manage Director's schedule by texting:\n\`!schedule 10:30 AM - HOD Meeting; 02:00 PM - AI Review\``
-        });
-        return;
+
+        if (parsedIntent.intent === 'VIEW_SCHEDULE') {
+          const targetDate = parsedIntent.viewDate || new Date().toISOString().split('T')[0];
+          const schedules = await getSchedulesByDate(targetDate);
+          const list = schedules.length > 0
+            ? schedules.map(s => `• *${s.time_slot}*: ${s.title} (${s.location}) [${s.priority}]`).join('\n')
+            : `No meetings scheduled for ${targetDate}.`;
+
+          await botSock.sendMessage(jid, {
+            text: `📅 *Director's Schedule (${targetDate}):*\n\n${list}\n\n_To add a meeting, simply text details naturally (e.g., "Meeting tomorrow at 7 PM with Thoolle")_`
+          });
+          return;
+        }
+
+        if (parsedIntent.intent === 'GENERAL_QUERY' && parsedIntent.message) {
+          await botSock.sendMessage(jid, {
+            text: parsedIntent.message
+          });
+          return;
+        }
       }
+
+      // Fallback if AI was unavailable
+      const todayStr = new Date().toISOString().split('T')[0];
+      const schedules = await getSchedulesByDate(todayStr);
+      const list = schedules.length > 0
+        ? schedules.map(s => `• *${s.time_slot}*: ${s.title} (${s.location})`).join('\n')
+        : 'No meetings scheduled for today.';
+      await botSock.sendMessage(jid, {
+        text: `📅 *Director's Schedule for Today (${todayStr}):*\n\n${list}\n\n_To add a meeting, text naturally (e.g. "Meeting tomorrow at 7 PM with Thoolle") or !schedule 10:30 AM - Title_`
+      });
+      return;
     }
 
     // --- Briefing on Demand Command ---
@@ -346,15 +382,20 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
                           lowerText.includes('search') ||
                           lowerText.includes('check') ||
                           lowerText.includes('iit') ||
-                          lowerText.includes('techfest');
+                          lowerText.includes('techfest') ||
+                          lowerText.includes('bombay') ||
+                          lowerText.includes('workshop');
 
     if (isEmailSearch) {
-      const keyword = text
-        .replace(/find|search|check|look for|show me|give me|the email of|email from|mail of|mail from|email|mail|emails|mails|bheja|aaya|kya|hai|se|ko|ka|ki|ke|please|plz/gi, '')
-        .replace(/[?!,.]/g, '')
+      // Clean query by removing common stop/filler words and time modifiers
+      const stopWords = /\b(find|search|check|look for|show me|give me|get me|the|email|mail|emails|mails|inbox|gmail|latest|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant)\b/gi;
+      const cleanKeyword = text
+        .replace(stopWords, ' ')
+        .replace(/[?!,.:;"'()[\]{}<>*#~]/g, ' ')
+        .replace(/\s+/g, ' ')
         .trim();
 
-      const queryTerm = keyword.length > 1 ? keyword : text;
+      const queryTerm = cleanKeyword.length > 1 ? cleanKeyword : text;
       console.log(`[Director Query] Searching live Gmail inbox for: "${queryTerm}"...`);
       
       try {

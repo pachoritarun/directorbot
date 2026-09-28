@@ -146,16 +146,33 @@ export async function searchGmail(searchQuery, limit = 10) {
   }
 
   try {
-    console.log(`[Gmail API] Searching inbox for: "${searchQuery}"...`);
-    const listRes = await gmail.users.messages.list({
+    const cleanQ = searchQuery.trim();
+    console.log(`[Gmail API] Searching inbox for: "${cleanQ}"...`);
+    let listRes = await gmail.users.messages.list({
       userId: 'me',
-      q: searchQuery,
+      q: cleanQ,
       maxResults: limit
     });
 
-    const messages = listRes.data.messages || [];
+    let messages = listRes.data.messages || [];
+
+    // If no exact match and query has multiple words (e.g. "iit bombay"), try broad OR search
+    if (messages.length === 0 && cleanQ.includes(' ')) {
+      const words = cleanQ.split(/\s+/).filter(w => w.length > 2);
+      if (words.length > 1) {
+        const orQuery = words.join(' OR ');
+        console.log(`[Gmail API] No direct match for "${cleanQ}". Trying broad search: "${orQuery}"...`);
+        listRes = await gmail.users.messages.list({
+          userId: 'me',
+          q: orQuery,
+          maxResults: limit
+        });
+        messages = listRes.data.messages || [];
+      }
+    }
+
     const results = await parseGmailMessageList(gmail, messages);
-    console.log(`[Gmail API] Search for "${searchQuery}" returned ${results.length} email(s)`);
+    console.log(`[Gmail API] Search for "${cleanQ}" returned ${results.length} email(s)`);
     return results;
   } catch (error) {
     console.error('[Gmail Service] Search error:', error.message);
