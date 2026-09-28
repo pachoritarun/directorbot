@@ -1,5 +1,19 @@
-// Socket.io Connection
-const socket = io();
+// Subpath detection for reverse proxy (e.g. /directorbot or /)
+const basePath = window.location.pathname.replace(/\/+$/, '');
+
+// Auto-prefix all relative API calls with the subpath
+const originalFetch = window.fetch;
+window.fetch = function(url, options) {
+  if (typeof url === 'string' && url.startsWith('/api/')) {
+    url = `${basePath}${url}`;
+  }
+  return originalFetch.call(this, url, options);
+};
+
+// Socket.io Connection with dynamic path
+const socket = io({
+  path: (basePath ? `${basePath}/socket.io` : '/socket.io')
+});
 
 // State
 let currentStatus = {
