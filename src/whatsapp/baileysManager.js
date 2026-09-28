@@ -589,10 +589,16 @@ export async function triggerDailyBriefing(targetJid = null) {
     );
     const whatsappSummary = await summarizeWhatsAppChats(recentChats);
 
-    // 4. Curate EdTech & AI News
+    // 4. Query recently sent email drafts or resolved actions
+    const sentDrafts = await query(
+      `SELECT recipient_email, subject, body, updated_at FROM email_drafts 
+       WHERE status = 'SENT' ORDER BY id DESC LIMIT 5`
+    );
+
+    // 5. Curate EdTech & AI News
     const edTechNews = await getEdTechAndAiNews();
 
-    // 5. Generate PDF
+    // 6. Generate PDF
     const orgName = (await getSetting('ORGANIZATION_NAME')) || process.env.ORGANIZATION_NAME || 'JECRC University';
     const directorTitle = (await getSetting('DIRECTOR_TITLE')) || process.env.DIRECTOR_TITLE || 'Office of the Director';
 
@@ -602,6 +608,7 @@ export async function triggerDailyBriefing(targetJid = null) {
       directorTitle,
       schedules,
       emails: analyzedEmails,
+      sentDrafts,
       whatsappSummary,
       edTechNews
     });
