@@ -190,7 +190,12 @@ export async function startBotSession() {
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
       const jid = msg.key.remoteJid;
-      if (!jid || jid.endsWith('@broadcast')) continue;
+
+      // STRICT FILTER: Bot ONLY operates in direct 1-on-1 private chats with authorized individuals.
+      // Silently ignore all groups (@g.us), broadcasts (@broadcast), newsletters (@newsletter), or group participants.
+      if (!jid || !jid.endsWith('@s.whatsapp.net') || jid.includes('@g.us') || msg.key.participant) {
+        continue;
+      }
 
       const text = msg.message.conversation ||
                    msg.message.extendedTextMessage?.text ||
@@ -199,16 +204,7 @@ export async function startBotSession() {
                    '';
       if (!text.trim()) continue;
 
-      let senderPhone = '';
-      if (msg.key.participant) {
-        senderPhone = msg.key.participant.split('@')[0];
-      } else if (msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
-        senderPhone = msg.key.remoteJidAlt.split('@')[0];
-      } else {
-        senderPhone = jid.split('@')[0];
-      }
-
-      console.log(`[Bot WhatsApp] Inbound text from ${senderPhone} (${jid}): "${text}"`);
+      const senderPhone = jid.split('@')[0];
       await handleBotIncomingMessage(jid, senderPhone, text);
     }
   });
@@ -227,27 +223,30 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     const cleanDir = cleanPhone(directorPhone);
     const cleanPa = cleanPhone(paPhone);
 
-    // Robust phone matcher: checks equality, endsWith, or last 10 digits
-    const matchPhone = (a, b) => {
-      if (!a || !b) return false;
-      if (a === b || a.endsWith(b) || b.endsWith(a)) return true;
-      if (a.length >= 10 && b.length >= 10 && a.slice(-10) === b.slice(-10)) return true;
-      return false;
+    // If neither Director nor PA is configured with a valid phone number (at least 10 digits), drop silently
+    if ((!cleanDir || cleanDir.length < 10) && (!cleanPa || cleanPa.length < 10)) {
+      console.warn(`[Bot Security] Inbound message dropped: Neither Director nor PA phone number is configured in settings.`);
+      return;
+    }
+
+    // Strict 10-digit matcher (avoids false positives with short strings or prefix mismatches)
+    const matchPhone = (sender, target) => {
+      if (!sender || !target) return false;
+      if (sender.length < 10 || target.length < 10) return false;
+      if (sender === target) return true;
+      return sender.slice(-10) === target.slice(-10);
     };
 
     const isDirector = matchPhone(cleanSender, cleanDir);
     const isPA = matchPhone(cleanSender, cleanPa);
 
     // --- STRICT ACCESS CONTROL / SECURITY FIREWALL ---
-    // If the sender is NEITHER Director NOR PA, reply with an authorization alert
+    // If the sender is NEITHER Director NOR PA, SILENTLY DROP THE MESSAGE!
+    // Never reply with access notices, texts, or files to unauthorized persons.
     if (!isDirector && !isPA) {
-      console.warn(`[Bot Security] Blocked unauthorized text from: ${senderPhone}. Configured Director: "${cleanDir || 'NONE'}", PA: "${cleanPa || 'NONE'}"`);
-      await logActivity('SECURITY', `Inbound text from unrecognized number ${senderPhone}: "${text.slice(0, 50)}"`, 'WARN');
-
-      await botSock.sendMessage(jid, {
-        text: `🔒 *Executive AI Assistant (Access Notice)*\n\nHello! Your WhatsApp number (*+${senderPhone}*) is not yet recognized as an authorized Executive.\n\n🛠️ *To authorize this number:*\n1. Open your Web Dashboard > *Settings & Keys*\n2. Enter *${senderPhone}* in *Director's Phone Number* (or PA's Phone Number)\n3. Click *Save Configuration*\n\nOnce saved, you can query the AI anytime for emails, meetings, drafts, and university briefings!`
-      });
-      return;
+      console.warn(`[Bot Security] Silently dropped text from unauthorized number: ${senderPhone}. Authorized Dir: "${cleanDir ? cleanDir.slice(-4) : 'NONE'}", PA: "${cleanPa ? cleanPa.slice(-4) : 'NONE'}"`);
+      await logActivity('SECURITY', `Silently ignored inbound text from unauthorized number ${senderPhone}`, 'WARN');
+      return; // SILENT DROP - DO NOT SEND ANY MESSAGE
     }
 
     // --- PA Commands & Natural AI Schedule Handling ---
@@ -553,12 +552,14 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
  */
 export async function triggerDailyBriefing(targetJid = null) {
   const todayStr = new Date().toISOString().split('T')[0];
-  const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE;
-  const recipientJid = targetJid || (directorPhone ? `${directorPhone.replace(/[^0-9]/g, '')}@s.whatsapp.net` : null);
+  const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE || '';
+  const cleanDir = directorPhone.replace(/[^0-9]/g, '');
 
-  if (!recipientJid && !targetJid) {
-    console.warn('[Briefing] Director phone number is not configured in settings.');
-    return { success: false, error: 'Director phone number missing' };
+  // SECURITY: The confidential Executive Briefing PDF and summary MUST ONLY be delivered to the verified Director phone!
+  // Never dispatch to arbitrary numbers, friends, or groups.
+  let recipientJid = null;
+  if (cleanDir && cleanDir.length >= 10) {
+    recipientJid = `${cleanDir}@s.whatsapp.net`;
   }
 
   try {
@@ -605,8 +606,9 @@ export async function triggerDailyBriefing(targetJid = null) {
       edTechNews
     });
 
-    // 6. Send PDF document & Text Summary via Bot WhatsApp
-    if (botSock) {
+    // 6. Send PDF document & Text Summary via Bot WhatsApp ONLY if verified Director phone exists
+    let dispatched = false;
+    if (botSock && recipientJid) {
       // First send WhatsApp text briefing
       const urgentCount = analyzedEmails.filter(e => e.priority === 'Urgent').length;
       const textDigest = `🏛️ *OFFICIAL EXECUTIVE DAILY BRIEFING*\n📅 *Date:* ${todayStr}\n\n` +
@@ -627,10 +629,13 @@ export async function triggerDailyBriefing(targetJid = null) {
         caption: `Executive Daily Intelligence Briefing - ${todayStr}`
       });
 
+      dispatched = true;
       await logActivity('BRIEFING', `Daily briefing PDF generated and sent to Director (${recipientJid})`, 'INFO');
+    } else {
+      console.log(`[Briefing] PDF generated at ${pdfPath}. WhatsApp dispatch skipped (no authorized Director phone configured or Bot WhatsApp disconnected).`);
     }
 
-    return { success: true, pdfPath };
+    return { success: true, pdfPath, dispatched };
   } catch (error) {
     console.error('[Briefing Error]:', error);
     await logActivity('BRIEFING', `Briefing generation failed: ${error.message}`, 'ERROR');
