@@ -182,15 +182,28 @@ export async function startBotSession() {
 
   // Handle incoming messages to Bot
   botSock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
       const jid = msg.key.remoteJid;
-      const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+      if (!jid || jid.endsWith('@broadcast')) continue;
+
+      const text = msg.message.conversation ||
+                   msg.message.extendedTextMessage?.text ||
+                   msg.message.imageMessage?.caption ||
+                   msg.message.videoMessage?.caption ||
+                   '';
       if (!text.trim()) continue;
 
-      const senderPhone = jid.split('@')[0];
+      let senderPhone = '';
+      if (msg.key.participant) {
+        senderPhone = msg.key.participant.split('@')[0];
+      } else if (msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
+        senderPhone = msg.key.remoteJidAlt.split('@')[0];
+      } else {
+        senderPhone = jid.split('@')[0];
+      }
+
+      console.log(`[Bot WhatsApp] Inbound text from ${senderPhone} (${jid}): "${text}"`);
       await handleBotIncomingMessage(jid, senderPhone, text);
     }
   });
@@ -200,184 +213,206 @@ export async function startBotSession() {
  * Handles incoming interactions on the Executive Bot number
  */
 async function handleBotIncomingMessage(jid, senderPhone, text) {
-  const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE || '';
-  const paPhone = (await getSetting('PA_PHONE')) || process.env.PA_PHONE || '';
+  try {
+    const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE || '';
+    const paPhone = (await getSetting('PA_PHONE')) || process.env.PA_PHONE || '';
 
-  const cleanPhone = (p) => p ? p.replace(/[^0-9]/g, '') : '';
-  const cleanSender = cleanPhone(senderPhone);
-  const cleanDir = cleanPhone(directorPhone);
-  const cleanPa = cleanPhone(paPhone);
+    const cleanPhone = (p) => p ? p.replace(/[^0-9]/g, '') : '';
+    const cleanSender = cleanPhone(senderPhone);
+    const cleanDir = cleanPhone(directorPhone);
+    const cleanPa = cleanPhone(paPhone);
 
-  const isDirector = cleanDir && (cleanSender.endsWith(cleanDir) || cleanDir.endsWith(cleanSender));
-  const isPA = cleanPa && (cleanSender.endsWith(cleanPa) || cleanPa.endsWith(cleanSender));
+    // Robust phone matcher: checks equality, endsWith, or last 10 digits
+    const matchPhone = (a, b) => {
+      if (!a || !b) return false;
+      if (a === b || a.endsWith(b) || b.endsWith(a)) return true;
+      if (a.length >= 10 && b.length >= 10 && a.slice(-10) === b.slice(-10)) return true;
+      return false;
+    };
 
-  // --- STRICT ACCESS CONTROL / SECURITY FIREWALL ---
-  // If the sender is NEITHER the Director NOR the authorized PA, completely ignore the message.
-  // The bot will NEVER reply to any student, faculty, stranger, or spammer.
-  if (!isDirector && !isPA) {
-    console.log(`[Bot Security] Blocked & Ignored unauthorized text from: ${senderPhone}`);
-    return;
-  }
+    const isDirector = matchPhone(cleanSender, cleanDir);
+    const isPA = matchPhone(cleanSender, cleanPa);
 
-  // --- PA Commands & Authorization ---
-  if (isPA && !isDirector) {
-    if (text.startsWith('!schedule')) {
-      const added = await parseScheduleFromText(text);
+    // --- STRICT ACCESS CONTROL / SECURITY FIREWALL ---
+    // If the sender is NEITHER Director NOR PA, reply with an authorization alert
+    if (!isDirector && !isPA) {
+      console.warn(`[Bot Security] Blocked unauthorized text from: ${senderPhone}. Configured Director: "${cleanDir || 'NONE'}", PA: "${cleanPa || 'NONE'}"`);
+      await logActivity('SECURITY', `Inbound text from unrecognized number ${senderPhone}: "${text.slice(0, 50)}"`, 'WARN');
+
       await botSock.sendMessage(jid, {
-        text: `✅ *Schedule Updated by PA:*\nAdded ${added.length} meeting(s) to Director's calendar for today.`
-      });
-      return;
-    } else {
-      // PA can check today's schedule
-      if (text.toLowerCase().includes('schedule') || text.toLowerCase().includes('meeting')) {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const schedules = await getSchedulesByDate(todayStr);
-        const list = schedules.length > 0
-          ? schedules.map(s => `• *${s.time_slot}*: ${s.title} (${s.location})`).join('\n')
-          : 'No meetings scheduled for today.';
-        await botSock.sendMessage(jid, {
-          text: `📅 *Director's Schedule for Today (${todayStr}):*\n\n${list}\n\n_To add a meeting, send: !schedule Time - Meeting Title_`
-        });
-        return;
-      }
-      // For any other text from PA, guide them
-      await botSock.sendMessage(jid, {
-        text: `Hello PA. You can manage Director's schedule by texting:\n\`!schedule 10:30 AM - HOD Meeting; 02:00 PM - AI Review\``
+        text: `🔒 *Executive AI Assistant (Access Notice)*\n\nHello! Your WhatsApp number (*+${senderPhone}*) is not yet recognized as an authorized Executive.\n\n🛠️ *To authorize this number:*\n1. Open your Web Dashboard > *Settings & Keys*\n2. Enter *${senderPhone}* in *Director's Phone Number* (or PA's Phone Number)\n3. Click *Save Configuration*\n\nOnce saved, you can query the AI anytime for emails, meetings, drafts, and university briefings!`
       });
       return;
     }
-  }
 
-  // --- Briefing on Demand Command ---
-  if (text.toLowerCase().trim() === '!briefing') {
-    await botSock.sendMessage(jid, { text: `⏳ Generating Executive Daily Briefing PDF... Please wait a moment.` });
-    await triggerDailyBriefing(jid);
-    return;
-  }
-
-  // --- Check if Director is confirming a pending email draft ---
-  const normalizedText = text.trim().toUpperCase();
-  if (normalizedText === 'CONFIRM' || normalizedText === 'YES' || normalizedText === 'SEND') {
-    const pendingDrafts = await query(
-      `SELECT * FROM email_drafts WHERE status = 'PENDING_VERIFICATION' ORDER BY id DESC LIMIT 1`
-    );
-
-    if (pendingDrafts.length > 0) {
-      const draft = pendingDrafts[0];
-      try {
-        await sendVerifiedEmail({
-          to: draft.recipient_email,
-          subject: draft.subject,
-          body: draft.body,
-          draftId: draft.id
-        });
+    // --- PA Commands & Authorization ---
+    if (isPA && !isDirector) {
+      if (text.startsWith('!schedule')) {
+        const added = await parseScheduleFromText(text);
         await botSock.sendMessage(jid, {
-          text: `🚀 *Email Sent Successfully!*\n\n*To:* ${draft.recipient_email}\n*Subject:* ${draft.subject}\n*Status:* Dispatched via Official Gmail.`
+          text: `✅ *Schedule Updated by PA:*\nAdded ${added.length} meeting(s) to Director's calendar for today.`
         });
         return;
-      } catch (err) {
+      } else {
+        // PA can check today's schedule
+        if (text.toLowerCase().includes('schedule') || text.toLowerCase().includes('meeting')) {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const schedules = await getSchedulesByDate(todayStr);
+          const list = schedules.length > 0
+            ? schedules.map(s => `• *${s.time_slot}*: ${s.title} (${s.location})`).join('\n')
+            : 'No meetings scheduled for today.';
+          await botSock.sendMessage(jid, {
+            text: `📅 *Director's Schedule for Today (${todayStr}):*\n\n${list}\n\n_To add a meeting, send: !schedule Time - Meeting Title_`
+          });
+          return;
+        }
+        // For any other text from PA, guide them
         await botSock.sendMessage(jid, {
-          text: `❌ *Failed to send email:* ${err.message}`
+          text: `Hello PA. You can manage Director's schedule by texting:\n\`!schedule 10:30 AM - HOD Meeting; 02:00 PM - AI Review\``
         });
         return;
       }
     }
-  }
 
-  if (normalizedText === 'CANCEL' || normalizedText === 'DISCARD') {
-    await query(`UPDATE email_drafts SET status = 'CANCELLED' WHERE status = 'PENDING_VERIFICATION'`);
-    await botSock.sendMessage(jid, {
-      text: `🛑 *Pending email draft has been cancelled.*`
-    });
-    return;
-  }
+    // --- Briefing on Demand Command ---
+    if (text.toLowerCase().trim() === '!briefing') {
+      await botSock.sendMessage(jid, { text: `⏳ Generating Executive Daily Briefing PDF... Please wait a moment.` });
+      await triggerDailyBriefing(jid);
+      return;
+    }
 
-  // --- Natural AI Conversation with Context ---
-  // 1. Gather Context
-  const todayStr = new Date().toISOString().split('T')[0];
-  const schedules = await getSchedulesByDate(todayStr);
-
-  const recentChats = await query(
-    `SELECT sender_name, sender_phone, message_text, timestamp FROM whatsapp_chats 
-     WHERE is_from_me = FALSE ORDER BY id DESC LIMIT 20`
-  );
-
-  const recentEmails = await query(
-    `SELECT sender_name, subject, summary, priority, action_required FROM email_summaries 
-     ORDER BY id DESC LIMIT 10`
-  );
-
-  const pendingDrafts = await query(
-    `SELECT * FROM email_drafts WHERE status = 'PENDING_VERIFICATION' LIMIT 1`
-  );
-
-  const aiReply = await handleDirectorChat(text, {
-    schedules,
-    whatsappMessages: recentChats,
-    recentEmails,
-    pendingDrafts
-  });
-
-  // Check if AI generated an action block
-  // Format: [ACTION:WHATSAPP_REPLY | TO:recipient | MESSAGE:text]
-  const replyMatch = aiReply.match(/\[ACTION:WHATSAPP_REPLY\s*\|\s*TO:([^|]+)\|\s*MESSAGE:([^\]]+)\]/i);
-  if (replyMatch) {
-    const targetRecipient = replyMatch[1].trim();
-    const messageToSend = replyMatch[2].trim();
-
-    // Find recipient JID from database or phone
-    let targetJid = null;
-    if (targetRecipient.includes('@s.whatsapp.net')) {
-      targetJid = targetRecipient;
-    } else {
-      const found = await query(
-        `SELECT chat_jid, sender_name FROM whatsapp_chats 
-         WHERE sender_name LIKE ? OR sender_phone LIKE ? ORDER BY id DESC LIMIT 1`,
-        [`%${targetRecipient}%`, `%${targetRecipient}%`]
+    // --- Check if Director is confirming a pending email draft ---
+    const normalizedText = text.trim().toUpperCase();
+    if (normalizedText === 'CONFIRM' || normalizedText === 'YES' || normalizedText === 'SEND') {
+      const pendingDrafts = await query(
+        `SELECT * FROM email_drafts WHERE status = 'PENDING_VERIFICATION' ORDER BY id DESC LIMIT 1`
       );
-      if (found.length > 0) {
-        targetJid = found[0].chat_jid;
+
+      if (pendingDrafts.length > 0) {
+        const draft = pendingDrafts[0];
+        try {
+          await sendVerifiedEmail({
+            to: draft.recipient_email,
+            subject: draft.subject,
+            body: draft.body,
+            draftId: draft.id
+          });
+          await botSock.sendMessage(jid, {
+            text: `🚀 *Email Sent Successfully!*\n\n*To:* ${draft.recipient_email}\n*Subject:* ${draft.subject}\n*Status:* Dispatched via Official Gmail.`
+          });
+          return;
+        } catch (err) {
+          await botSock.sendMessage(jid, {
+            text: `❌ *Failed to send email:* ${err.message}`
+          });
+          return;
+        }
       }
     }
 
-    if (targetJid && directorSock) {
-      await directorSock.sendMessage(targetJid, { text: messageToSend });
-      const cleanReply = aiReply.replace(replyMatch[0], '').trim();
+    if (normalizedText === 'CANCEL' || normalizedText === 'DISCARD') {
+      await query(`UPDATE email_drafts SET status = 'CANCELLED' WHERE status = 'PENDING_VERIFICATION'`);
       await botSock.sendMessage(jid, {
-        text: `${cleanReply}\n\n✅ *Message sent to ${targetRecipient} from your Director WhatsApp account:* "${messageToSend}"`
-      });
-      return;
-    } else {
-      await botSock.sendMessage(jid, {
-        text: `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact phone number.`
+        text: `🛑 *Pending email draft has been cancelled.*`
       });
       return;
     }
-  }
 
-  // Format: [ACTION:DRAFT_EMAIL | TO:recipient | SUBJECT:subject | BODY:body]
-  const emailDraftMatch = aiReply.match(/\[ACTION:DRAFT_EMAIL\s*\|\s*TO:([^|]+)\|\s*SUBJECT:([^|]+)\|\s*BODY:([^\]]+)\]/i);
-  if (emailDraftMatch) {
-    const to = emailDraftMatch[1].trim();
-    const subject = emailDraftMatch[2].trim();
-    const body = emailDraftMatch[3].trim();
+    // --- Natural AI Conversation with Context ---
+    // 1. Gather Context
+    const todayStr = new Date().toISOString().split('T')[0];
+    const schedules = await getSchedulesByDate(todayStr);
 
-    // Save draft in MySQL
-    await query(
-      `INSERT INTO email_drafts (recipient_email, recipient_name, subject, body, status)
-       VALUES (?, ?, ?, ?, 'PENDING_VERIFICATION')`,
-      [to, to, subject, body]
+    const recentChats = await query(
+      `SELECT sender_name, sender_phone, message_text, timestamp FROM whatsapp_chats 
+       WHERE is_from_me = FALSE ORDER BY id DESC LIMIT 20`
     );
 
-    const cleanReply = aiReply.replace(emailDraftMatch[0], '').trim();
-    await botSock.sendMessage(jid, {
-      text: `${cleanReply}\n\n━━━━━━━━━━━━━━━━━━━━\n📝 *DRAFT EMAIL READY FOR REVIEW:*\n*To:* ${to}\n*Subject:* ${subject}\n\n*Body:*\n${body}\n━━━━━━━━━━━━━━━━━━━━\n⚠️ *Reply "CONFIRM" to dispatch this email, or "CANCEL" to discard.*`
-    });
-    return;
-  }
+    const recentEmails = await query(
+      `SELECT sender_name, subject, summary, priority, action_required FROM email_summaries 
+       ORDER BY id DESC LIMIT 10`
+    );
 
-  // Regular AI response
-  await botSock.sendMessage(jid, { text: aiReply });
+    const pendingDrafts = await query(
+      `SELECT * FROM email_drafts WHERE status = 'PENDING_VERIFICATION' LIMIT 1`
+    );
+
+    const aiReply = await handleDirectorChat(text, {
+      schedules,
+      whatsappMessages: recentChats,
+      recentEmails,
+      pendingDrafts
+    });
+
+    // Check if AI generated an action block
+    // Format: [ACTION:WHATSAPP_REPLY | TO:recipient | MESSAGE:text]
+    const replyMatch = aiReply.match(/\[ACTION:WHATSAPP_REPLY\s*\|\s*TO:([^|]+)\|\s*MESSAGE:([^\]]+)\]/i);
+    if (replyMatch) {
+      const targetRecipient = replyMatch[1].trim();
+      const messageToSend = replyMatch[2].trim();
+
+      // Find recipient JID from database or phone
+      let targetJid = null;
+      if (targetRecipient.includes('@s.whatsapp.net')) {
+        targetJid = targetRecipient;
+      } else {
+        const found = await query(
+          `SELECT chat_jid, sender_name FROM whatsapp_chats 
+           WHERE sender_name LIKE ? OR sender_phone LIKE ? ORDER BY id DESC LIMIT 1`,
+          [`%${targetRecipient}%`, `%${targetRecipient}%`]
+        );
+        if (found.length > 0) {
+          targetJid = found[0].chat_jid;
+        }
+      }
+
+      if (targetJid && directorSock) {
+        await directorSock.sendMessage(targetJid, { text: messageToSend });
+        const cleanReply = aiReply.replace(replyMatch[0], '').trim();
+        await botSock.sendMessage(jid, {
+          text: `${cleanReply}\n\n✅ *Message sent to ${targetRecipient} from your Director WhatsApp account:* "${messageToSend}"`
+        });
+        return;
+      } else {
+        await botSock.sendMessage(jid, {
+          text: `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact phone number.`
+        });
+        return;
+      }
+    }
+
+    // Format: [ACTION:DRAFT_EMAIL | TO:recipient | SUBJECT:subject | BODY:body]
+    const emailDraftMatch = aiReply.match(/\[ACTION:DRAFT_EMAIL\s*\|\s*TO:([^|]+)\|\s*SUBJECT:([^|]+)\|\s*BODY:([^\]]+)\]/i);
+    if (emailDraftMatch) {
+      const to = emailDraftMatch[1].trim();
+      const subject = emailDraftMatch[2].trim();
+      const body = emailDraftMatch[3].trim();
+
+      // Save draft in MySQL
+      await query(
+        `INSERT INTO email_drafts (recipient_email, recipient_name, subject, body, status)
+         VALUES (?, ?, ?, ?, 'PENDING_VERIFICATION')`,
+        [to, to, subject, body]
+      );
+
+      const cleanReply = aiReply.replace(emailDraftMatch[0], '').trim();
+      await botSock.sendMessage(jid, {
+        text: `${cleanReply}\n\n━━━━━━━━━━━━━━━━━━━━\n📝 *DRAFT EMAIL READY FOR REVIEW:*\n*To:* ${to}\n*Subject:* ${subject}\n\n*Body:*\n${body}\n━━━━━━━━━━━━━━━━━━━━\n⚠️ *Reply "CONFIRM" to dispatch this email, or "CANCEL" to discard.*`
+      });
+      return;
+    }
+
+    // Regular AI response
+    await botSock.sendMessage(jid, { text: aiReply });
+  } catch (err) {
+    console.error('[Bot Error]:', err);
+    await logActivity('BOT_ERROR', `Error processing query from ${senderPhone}: ${err.message}`, 'ERROR');
+    try {
+      await botSock.sendMessage(jid, {
+        text: `⚠️ *Executive Assistant Alert*\n\nI encountered an error processing your query: ${err.message}`
+      });
+    } catch (e) {}
+  }
 }
 
 /**

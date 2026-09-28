@@ -27,6 +27,30 @@ export async function getGeminiClient() {
 }
 
 /**
+ * Robust wrapper that calls Gemini with automatic fallback models on 503 or overload spikes
+ */
+export async function callGeminiWithFallback(client, options) {
+  const primaryModel = (await getGeminiModel()) || 'gemini-3.7-flash';
+  const candidates = [primaryModel, 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+  const models = [...new Set(candidates)];
+  let lastErr = null;
+
+  for (const m of models) {
+    try {
+      const res = await client.models.generateContent({
+        ...options,
+        model: m
+      });
+      return res;
+    } catch (err) {
+      console.warn(`[Gemini] Model ${m} spike/error: ${err.message.slice(0, 90)}. Trying fallback...`);
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Analyzes unread/recent emails and categorizes them with AI
  */
 export async function analyzeEmails(emails) {
@@ -72,9 +96,7 @@ Return your response strictly as valid JSON array of objects with the following 
 ]
 `;
 
-    const model = await getGeminiModel();
-    const response = await client.models.generateContent({
-      model,
+    const response = await callGeminiWithFallback(client, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
@@ -147,9 +169,7 @@ Return strictly as JSON with this structure:
 }
 `;
 
-    const model = await getGeminiModel();
-    const response = await client.models.generateContent({
-      model,
+    const response = await callGeminiWithFallback(client, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
@@ -214,9 +234,7 @@ Format strictly as a JSON array:
 ]
 `;
 
-    const model = await getGeminiModel();
-    const response = await client.models.generateContent({
-      model,
+    const response = await callGeminiWithFallback(client, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
@@ -268,9 +286,7 @@ Instructions:
 5. For general queries, answer directly with executive clarity.
 `;
 
-    const model = await getGeminiModel();
-    const response = await client.models.generateContent({
-      model,
+    const response = await callGeminiWithFallback(client, {
       contents: prompt
     });
 
@@ -307,9 +323,7 @@ Return strictly as JSON:
 }
 `;
 
-    const model = await getGeminiModel();
-    const response = await client.models.generateContent({
-      model,
+    const response = await callGeminiWithFallback(client, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
