@@ -486,23 +486,47 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     }
 
     // Format: [ACTION:DRAFT_EMAIL | TO:recipient | SUBJECT:subject | BODY:body]
-    const emailDraftMatch = aiReply.match(/\[ACTION:DRAFT_EMAIL\s*\|\s*TO:([^|]+)\|\s*SUBJECT:([^|]+)\|\s*BODY:([^\]]+)\]/i);
+    const emailDraftMatch = aiReply.match(/\[ACTION:DRAFT_EMAIL\s*\|\s*TO:([^|]+)\|\s*SUBJECT:([^|]+)\|\s*BODY:([\s\S]*?)\]/i) ||
+      aiReply.match(/\[ACTION:DRAFT_EMAIL\s*\|\s*TO:([^|]+)\|\s*SUBJECT:([^|]+)\|\s*BODY:([^\]]+)\]/i);
+
     if (emailDraftMatch) {
       const to = emailDraftMatch[1].trim();
       const subject = emailDraftMatch[2].trim();
-      const body = emailDraftMatch[3].trim();
+      let rawBody = emailDraftMatch[3].trim();
 
-      // Save draft in MySQL
+      // Clean up any literal escaped \n, \r\n, \t or stray backslashes
+      const cleanBody = rawBody
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '')
+        .replace(/\\t/g, '  ')
+        .trim();
+
+      // Save draft in MySQL with clean real newlines
       await query(
         `INSERT INTO email_drafts (recipient_email, recipient_name, subject, body, status)
          VALUES (?, ?, ?, ?, 'PENDING_VERIFICATION')`,
-        [to, to, subject, body]
+        [to, to, subject, cleanBody]
       );
 
-      const cleanReply = aiReply.replace(emailDraftMatch[0], '').trim();
-      await botSock.sendMessage(jid, {
-        text: `${cleanReply}\n\n━━━━━━━━━━━━━━━━━━━━\n📝 *DRAFT EMAIL READY FOR REVIEW:*\n*To:* ${to}\n*Subject:* ${subject}\n\n*Body:*\n${body}\n━━━━━━━━━━━━━━━━━━━━\n⚠️ *Reply "CONFIRM" to dispatch this email, or "CANCEL" to discard.*`
-      });
+      let cleanReply = aiReply.replace(emailDraftMatch[0], '')
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .trim();
+
+      // If cleanReply already provided the full draft preview, don't duplicate the card
+      let reviewMessage = '';
+      if (cleanReply && cleanReply.toLowerCase().includes('*body:*')) {
+        reviewMessage = cleanReply;
+        if (!reviewMessage.toUpperCase().includes('CONFIRM')) {
+          reviewMessage += `\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ *Reply "CONFIRM" to dispatch this email, or "CANCEL" to discard.*`;
+        }
+      } else {
+        const intro = cleanReply || 'Sir, I have drafted the email for your review:';
+        reviewMessage = `${intro}\n\n━━━━━━━━━━━━━━━━━━━━\n📝 *DRAFT EMAIL READY FOR REVIEW:*\n*To:* ${to}\n*Subject:* ${subject}\n\n*Body:*\n${cleanBody}\n━━━━━━━━━━━━━━━━━━━━\n⚠️ *Reply "CONFIRM" to dispatch this email, or "CANCEL" to discard.*`;
+      }
+
+      await botSock.sendMessage(jid, { text: reviewMessage });
       return;
     }
 

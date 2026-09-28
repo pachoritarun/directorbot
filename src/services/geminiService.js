@@ -31,7 +31,7 @@ export async function getGeminiClient() {
  */
 export async function callGeminiWithFallback(client, options) {
   const primaryModel = (await getGeminiModel()) || 'gemini-3.7-flash';
-  const candidates = [primaryModel, 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+  const candidates = [primaryModel, 'gemini-3.7-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
   const models = [...new Set(candidates)];
   let lastErr = null;
 
@@ -288,11 +288,13 @@ Instructions:
 4. If the Director wants to reply to someone on WhatsApp (e.g. "Reply to Tarun: meet me at 4 PM"):
    Recognize the intent and specify an action block:
    [ACTION:WHATSAPP_REPLY | TO:recipient_name_or_phone | MESSAGE:reply_content]
-5. If the Director wants to send an email (e.g. "Tarun ko email bhej do..."):
-   NEVER say the email is already sent! Prepare the draft and tell the Director:
-   "I have drafted the email. Please review the details below. Reply 'CONFIRM' to send or 'CANCEL' to discard."
-   And include an action block:
-   [ACTION:DRAFT_EMAIL | TO:recipient | SUBJECT:subject | BODY:body_content]
+5. If the Director wants to send an email (e.g. "Tarun ko email bhej do...", "Send email to..."):
+   NEVER say the email is already sent! Prepare the draft and output:
+   [ACTION:DRAFT_EMAIL | TO:recipient_email | SUBJECT:subject_line | BODY:body_content]
+   CRITICAL FOR EMAIL DRAFT:
+   - For BODY, use clean natural paragraphs with real line breaks. Do NOT write literal "\n" or escaped slashes.
+   - Do NOT duplicate the email body or subject outside the action block. Only give a polite 1-line lead-in like:
+     "Sir, I have prepared the email draft for your review:"
 6. For general queries, answer directly with executive clarity.
 `;
 
@@ -303,7 +305,39 @@ Instructions:
     return typeof response.text === 'function' ? response.text() : (response.text || '');
   } catch (error) {
     console.error('[Gemini] Chat handling error:', error.message);
-    return `Sir, I encountered an issue processing your request: ${error.message}`;
+
+    // Graceful fallback if matchedEmails are available in context
+    if (context && context.matchedEmails && context.matchedEmails.length > 0) {
+      let emailReport = `Sir, here are the emails retrieved from your records:\n\n`;
+      context.matchedEmails.slice(0, 5).forEach((e, idx) => {
+        emailReport += `*${idx + 1}. ${e.subject || 'No Subject'}*\n`;
+        emailReport += `• *From:* ${e.from || 'Unknown'}\n`;
+        emailReport += `• *Date:* ${e.date || 'Recent'}\n`;
+        if (e.snippet) emailReport += `• *Snippet:* ${e.snippet}\n`;
+        emailReport += `\n`;
+      });
+      emailReport += `Please let me know if you would like me to draft a reply or search for another sender.`;
+      return emailReport;
+    }
+
+    // Graceful fallback if upcoming schedules are available in context
+    const isMeetingQuery = userQuery.toLowerCase().includes('meet') || 
+                           userQuery.toLowerCase().includes('schedule') || 
+                           userQuery.toLowerCase().includes('tomorrow') || 
+                           userQuery.toLowerCase().includes('today');
+    if (context && context.schedules && context.schedules.length > 0 && isMeetingQuery) {
+      let scheduleReport = `Sir, here are your scheduled meetings:\n\n`;
+      context.schedules.slice(0, 5).forEach(s => {
+        scheduleReport += `📅 *${s.schedule_date}* at *${s.schedule_time || 'TBD'}*\n`;
+        scheduleReport += `📌 *Agenda:* ${s.title || 'Meeting'}\n`;
+        if (s.notes) scheduleReport += `📝 *Notes:* ${s.notes}\n`;
+        if (s.location) scheduleReport += `📍 *Location:* ${s.location}\n`;
+        scheduleReport += `\n`;
+      });
+      return scheduleReport;
+    }
+
+    return `Sir, the assistant service is temporarily experiencing high demand. Please try again in a few moments, or let me know if you would like me to retrieve specific emails or check your itinerary.`;
   }
 }
 

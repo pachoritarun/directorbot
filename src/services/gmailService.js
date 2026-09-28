@@ -241,6 +241,13 @@ export async function sendVerifiedEmail({ to, subject, body, draftId = null }) {
     throw new Error('Director Gmail is not connected. Cannot send email.');
   }
 
+  // Ensure body has clean real newlines and no escaped slashes (\n)
+  const cleanBody = (body || '')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '')
+    .trim();
+
   const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
   const messageParts = [
     `To: ${to}`,
@@ -248,7 +255,7 @@ export async function sendVerifiedEmail({ to, subject, body, draftId = null }) {
     'Content-Type: text/plain; charset=utf-8',
     'MIME-Version: 1.0',
     '',
-    body
+    cleanBody
   ];
   const rawMessage = messageParts.join('\r\n');
   const encodedMessage = Buffer.from(rawMessage)
