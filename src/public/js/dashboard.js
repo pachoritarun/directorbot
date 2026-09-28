@@ -1,5 +1,11 @@
 // Subpath detection for reverse proxy (e.g. /directorbot or /)
-const basePath = window.location.pathname.replace(/\/+$/, '');
+let basePath = window.location.pathname.replace(/\/+$/, '');
+if (basePath.endsWith('.html') || basePath.includes('.htm')) {
+  basePath = basePath.substring(0, basePath.lastIndexOf('/'));
+}
+if (basePath === '/' || !basePath) {
+  basePath = '';
+}
 
 // Auto-prefix all relative API calls with the subpath
 const originalFetch = window.fetch;
@@ -620,7 +626,13 @@ async function disconnectGmailAccount() {
   }
   try {
     const res = await fetch('/api/gmail/disconnect', { method: 'POST' });
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`Server returned (${res.status} ${res.statusText}). Please make sure your server is restarted with the latest code.`);
+    }
+
     if (data.success) {
       showToast('Google account disconnected successfully.');
       await loadStatus();
@@ -630,7 +642,7 @@ async function disconnectGmailAccount() {
       showToast(`Error: ${data.error || 'Failed to disconnect'}`);
     }
   } catch (err) {
-    showToast(`Disconnect request failed: ${err.message}`);
+    showToast(`Disconnect failed: ${err.message}`);
   }
 }
 
