@@ -181,55 +181,58 @@ export async function searchGmail(searchQuery, limit = 10) {
 }
 
 /**
- * Helper to fetch full details for a list of Gmail message IDs
+ * Helper to fetch full details for a list of Gmail message IDs concurrently
  */
 async function parseGmailMessageList(gmail, messages) {
-  const parsedEmails = [];
+  if (!messages || messages.length === 0) return [];
 
-  for (const msg of messages) {
-    try {
-      const details = await gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id,
-        format: 'full'
-      });
+  const parsedEmails = await Promise.all(
+    messages.slice(0, 10).map(async (msg) => {
+      try {
+        const details = await gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id,
+          format: 'full'
+        });
 
-      const headers = details.data.payload?.headers || [];
-      const getHeader = (name) => {
-        const found = headers.find(h => h.name.toLowerCase() === name.toLowerCase());
-        return found ? found.value : '';
-      };
+        const headers = details.data.payload?.headers || [];
+        const getHeader = (name) => {
+          const found = headers.find(h => h.name.toLowerCase() === name.toLowerCase());
+          return found ? found.value : '';
+        };
 
-      const from = getHeader('From');
-      const subject = getHeader('Subject') || '(No Subject)';
-      const date = getHeader('Date');
-      const snippet = details.data.snippet || '';
+        const from = getHeader('From');
+        const subject = getHeader('Subject') || '(No Subject)';
+        const date = getHeader('Date');
+        const snippet = details.data.snippet || '';
 
-      // Extract sender name and clean email
-      let senderName = from;
-      let senderEmail = from;
-      const match = from.match(/(.*)<(.*)>/);
-      if (match) {
-        senderName = match[1].replace(/["']/g, '').trim();
-        senderEmail = match[2].trim();
+        // Extract sender name and clean email
+        let senderName = from;
+        let senderEmail = from;
+        const match = from.match(/(.*)<(.*)>/);
+        if (match) {
+          senderName = match[1].replace(/["']/g, '').trim();
+          senderEmail = match[2].trim();
+        }
+
+        return {
+          id: msg.id,
+          threadId: details.data.threadId,
+          from: senderName || senderEmail,
+          senderEmail,
+          senderName,
+          subject,
+          snippet,
+          date
+        };
+      } catch (e) {
+        console.warn(`[Gmail Service] Could not fetch message ${msg.id}:`, e.message);
+        return null;
       }
+    })
+  );
 
-      parsedEmails.push({
-        id: msg.id,
-        threadId: details.data.threadId,
-        from: senderName || senderEmail,
-        senderEmail,
-        senderName,
-        subject,
-        snippet,
-        date
-      });
-    } catch (e) {
-      console.warn(`[Gmail Service] Could not fetch message ${msg.id}:`, e.message);
-    }
-  }
-
-  return parsedEmails;
+  return parsedEmails.filter(Boolean);
 }
 
 /**

@@ -64,7 +64,8 @@ export async function startDirectorSession() {
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
     auth: state,
-    browser: ['Executive Listener', 'Chrome', '1.0.0']
+    browser: ['Executive Listener', 'Chrome', '1.0.0'],
+    syncFullHistory: true
   });
 
   directorSock.ev.on('creds.update', saveCreds);
@@ -97,43 +98,18 @@ export async function startDirectorSession() {
     }
   });
 
-  // Listen to incoming messages SILENTLY without marking them as read!
-  directorSock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-
-    for (const msg of messages) {
-      if (!msg.message) continue;
-      const jid = msg.key.remoteJid;
-      if (jid === 'status@broadcast') continue; // Ignore WhatsApp Status
-
-      const isFromMe = msg.key.fromMe || false;
-      const senderName = msg.pushName || (isFromMe ? 'Director' : jid.split('@')[0]);
-      const senderPhone = jid.split('@')[0];
-      const timestamp = msg.messageTimestamp;
-
-      // Extract message text
-      const text = msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        msg.message.imageMessage?.caption ||
-        '';
-
-      if (!text.trim()) continue;
-
-      // NOTE: WE DO NOT CALL directorSock.readMessages([msg.key])!
-      // This leaves the message as UNREAD on Director's phone.
-
-      // Store in MySQL
-      try {
-        await query(
-          `INSERT INTO whatsapp_chats (msg_id, chat_jid, sender_name, sender_phone, message_text, timestamp, is_from_me)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE message_text = VALUES(message_text)`,
-          [msg.key.id, jid, senderName, senderPhone, text, timestamp, isFromMe]
-        );
-      } catch (err) {
-        // duplicate or error ignored
-      }
+  // Listen to historical chat sync event from WhatsApp multi-device
+  directorSock.ev.on('messaging-history.set', async ({ chats, contacts, messages }) => {
+    console.log(`[Director WhatsApp] History sync event received: ${messages?.length || 0} messages, ${chats?.length || 0} chats, ${contacts?.length || 0} contacts`);
+    if (messages && messages.length > 0) {
+      await saveWhatsAppMessagesBatch(messages);
     }
+  });
+
+  // Listen to incoming messages SILENTLY without marking them as read!
+  // Process both 'notify' (live incoming messages) and 'append' (synced history chunks)
+  directorSock.ev.on('messages.upsert', async ({ messages, type }) => {
+    await saveWhatsAppMessagesBatch(messages);
   });
 }
 
@@ -699,52 +675,81 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
                           lowerText.includes('.edu');
 
     if (isEmailSearch) {
-      // 1. Check if user typed an explicit email address (e.g. Amitdheemant@jecrcu.edu.in)
-      const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
-      const emailMatch = text.match(emailRegex);
+      const isGeneralRecent = 
+        lowerText.includes('latest email') || 
+        lowerText.includes('recent email') || 
+        lowerText.includes('new email') || 
+        lowerText.includes('check email') || 
+        lowerText.includes('my email') ||
+        lowerText.includes('last email') ||
+        lowerText.includes('unread email') ||
+        lowerText.includes('give me email') ||
+        lowerText.includes('aaya email');
 
-      let queryTerm = '';
-      if (emailMatch) {
-        const addr = emailMatch[1].toLowerCase();
-        queryTerm = `from:${addr} OR to:${addr} OR "${addr}"`;
+      if (isGeneralRecent) {
+        console.log(`[Director Query] Fetching latest inbox emails directly...`);
+        try {
+          const liveRecent = await fetchUnreadEmails(6, false);
+          if (liveRecent && liveRecent.length > 0) {
+            matchedEmails.push(...liveRecent);
+          }
+        } catch (e) {}
       } else {
-        // 2. Check if user is asking for emails from a specific person
-        const fromMatch = lowerText.match(/(?:from|sent by|bheja|send)\s+([a-zA-Z0-9_-]+)/i);
-        if (fromMatch && fromMatch[1] && fromMatch[1].length > 2) {
-          const person = fromMatch[1].trim();
-          queryTerm = `from:${person} OR "${person}"`;
-        } else {
-          // 3. Clean keywords (remove stop/filler words while preserving dots and hyphens)
-          const stopWords = /\b(find|search|check|look for|show me|give me|get me|the|email|mail|emails|mails|inbox|gmail|latest|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
-          const cleanKeyword = text
-            .replace(stopWords, ' ')
-            .replace(/[?!,;'"()[\]{}<>*#~]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          queryTerm = cleanKeyword.length > 1 ? cleanKeyword : text;
-        }
-      }
+        // 1. Check if user typed an explicit email address (e.g. Amitdheemant@jecrcu.edu.in)
+        const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
+        const emailMatch = text.match(emailRegex);
 
-      console.log(`[Director Query] Searching live Gmail inbox for: "${queryTerm}"...`);
-      
-      try {
-        const liveFound = await searchGmail(queryTerm, 20);
-        if (liveFound && liveFound.length > 0) {
-          matchedEmails.push(...liveFound);
-          // Auto-index into MySQL cache so it is permanently remembered
-          for (const em of liveFound) {
-            try {
-              await query(
-                `INSERT INTO email_summaries (gmail_id, sender_email, sender_name, subject, snippet, date_received, priority, summary, action_required)
-                 VALUES (?, ?, ?, ?, ?, ?, 'Normal', ?, 'Informational')
-                 ON DUPLICATE KEY UPDATE summary = VALUES(summary)`,
-                [em.id, em.senderEmail, em.senderName, em.subject, em.snippet, em.date || '', em.snippet]
-              );
-            } catch(e) {}
+        let queryTerm = '';
+        if (emailMatch) {
+          const addr = emailMatch[1].toLowerCase();
+          queryTerm = `from:${addr} OR to:${addr} OR "${addr}"`;
+        } else {
+          // 2. Check if user is asking for emails from a specific person
+          const fromMatch = lowerText.match(/(?:from|sent by|bheja|send)\s+([a-zA-Z0-9_-]+)/i);
+          if (fromMatch && fromMatch[1] && fromMatch[1].length > 2) {
+            const person = fromMatch[1].trim();
+            queryTerm = `from:${person} OR "${person}"`;
+          } else {
+            // 3. Clean keywords (remove stop/filler words while preserving dots and hyphens)
+            const stopWords = /\b(find|search|check|look for|show me|give me|get me|the|email|mail|emails|mails|inbox|gmail|latest|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
+            const cleanKeyword = text
+              .replace(stopWords, ' ')
+              .replace(/[?!,;'"()[\]{}<>*#~]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            queryTerm = cleanKeyword.length > 1 ? cleanKeyword : '';
           }
         }
-      } catch (searchErr) {
-        console.warn('[Director Query] Gmail search failed:', searchErr.message);
+
+        if (queryTerm) {
+          console.log(`[Director Query] Searching live Gmail inbox for: "${queryTerm}"...`);
+          try {
+            const liveFound = await searchGmail(queryTerm, 15);
+            if (liveFound && liveFound.length > 0) {
+              matchedEmails.push(...liveFound);
+              for (const em of liveFound) {
+                try {
+                  await query(
+                    `INSERT INTO email_summaries (gmail_id, sender_email, sender_name, subject, snippet, date_received, priority, summary, action_required)
+                     VALUES (?, ?, ?, ?, ?, ?, 'Normal', ?, 'Informational')
+                     ON DUPLICATE KEY UPDATE summary = VALUES(summary)`,
+                    [em.id, em.senderEmail, em.senderName, em.subject, em.snippet, em.date || '', em.snippet]
+                  );
+                } catch(e) {}
+              }
+            }
+          } catch (searchErr) {
+            console.warn('[Director Query] Gmail search failed:', searchErr.message);
+          }
+        } else {
+          // If query term reduced to empty, fallback to fetching recent emails
+          try {
+            const liveRecent = await fetchUnreadEmails(6, false);
+            if (liveRecent && liveRecent.length > 0) {
+              matchedEmails.push(...liveRecent);
+            }
+          } catch (e) {}
+        }
       }
     }
 
