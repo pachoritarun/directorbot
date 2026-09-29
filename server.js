@@ -560,6 +560,24 @@ app.get('/api/logs', async (req, res) => {
   }
 });
 
+// Diagnostic chat search endpoint
+app.get('/api/debug/search-chats', async (req, res) => {
+  const q = req.query.q || '';
+  if (!q) return res.json({ count: 0, query: '', sample: [] });
+  try {
+    const rows = await query(
+      `SELECT id, chat_jid, sender_name, sender_phone, message_text, timestamp, is_from_me 
+       FROM whatsapp_chats 
+       WHERE sender_name LIKE ? OR sender_phone LIKE ? OR chat_jid LIKE ? OR message_text LIKE ? 
+       ORDER BY id DESC LIMIT 50`,
+      [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`]
+    );
+    res.json({ count: rows.length, query: q, sample: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Scheduled Daily Morning Briefing Checker ---
 let lastBriefingDate = '';
 setInterval(async () => {
