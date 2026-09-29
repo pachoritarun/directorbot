@@ -712,20 +712,34 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     let matchedWhatsAppMessages = [];
     const isWaQuery = lowerText.includes('whatsapp') || lowerText.includes('chat') || lowerText.includes('text') || lowerText.includes('message') || lowerText.includes('kaha') || lowerText.includes('bheja') || lowerText.includes('said') || lowerText.includes('bol');
     if (isWaQuery) {
+      // 1. Extract any numeric limit (e.g. "last 10 chat", "5 messages")
+      let queryLimit = 30;
+      const numMatch = text.match(/\b(\d{1,2})\b/);
+      if (numMatch) {
+        queryLimit = Math.max(1, Math.min(50, parseInt(numMatch[1], 10)));
+      }
+
+      // 2. Strip numbers, stop words, and punctuation to isolate the person's name / query term
       const stopWordsWa = /\b(find|search|check|look for|show me|give me|tell me|get me|the|whatsapp|chat|chats|text|texts|message|messages|msg|history|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
-      let cleanKeyword = text.replace(stopWordsWa, ' ').replace(/[?!,;'"()[\]{}<>*#~]/g, ' ').replace(/\s+/g, ' ').trim();
+      let cleanKeyword = text
+        .replace(/\b\d+\b/g, ' ')
+        .replace(stopWordsWa, ' ')
+        .replace(/[?!,;'"()[\]{}<>*#~]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
       
       let resolvedTargetJid = null;
       let targetPhone = null;
 
-      // Check if cleanKeyword or any word in cleanKeyword matches a cached contact (e.g. "yuvraj", "yuraj")
-      const words = cleanKeyword.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
-      for (const w of words) {
+      const targetWords = cleanKeyword.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
+      const searchTerms = [cleanKeyword, ...targetWords].filter(Boolean);
+
+      // Check A: recentDirectorContacts memory map (exact & fuzzy)
+      for (const w of searchTerms) {
         if (recentDirectorContacts.has(w)) {
           resolvedTargetJid = recentDirectorContacts.get(w);
           break;
         }
-        // Fuzzy match: e.g. "yuraj" -> "yuvraj"
         for (const [cName, cJid] of recentDirectorContacts.entries()) {
           if (cName.includes(w) || w.includes(cName) || levenshteinDistance(w, cName) <= 2) {
             resolvedTargetJid = cJid;
@@ -735,22 +749,44 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
         if (resolvedTargetJid) break;
       }
 
-      // Also search whatsapp_contacts table
-      if (!resolvedTargetJid && cleanKeyword.length >= 2) {
-        try {
-          const contactRows = await query(
-            `SELECT jid, phone, name FROM whatsapp_contacts WHERE name LIKE ? OR notify LIKE ? LIMIT 1`,
-            [`%${cleanKeyword}%`, `%${cleanKeyword}%`]
-          );
-          if (contactRows.length > 0) {
-            resolvedTargetJid = contactRows[0].jid;
-            targetPhone = contactRows[0].phone;
-          }
-        } catch (e) {}
+      // Check B: whatsapp_contacts table
+      if (!resolvedTargetJid) {
+        for (const w of searchTerms) {
+          try {
+            const contactRows = await query(
+              `SELECT jid, phone, name FROM whatsapp_contacts WHERE name LIKE ? OR notify LIKE ? LIMIT 1`,
+              [`%${w}%`, `%${w}%`]
+            );
+            if (contactRows.length > 0) {
+              resolvedTargetJid = contactRows[0].jid;
+              targetPhone = contactRows[0].phone;
+              break;
+            }
+          } catch (e) {}
+        }
       }
 
-      if (resolvedTargetJid) {
-        targetPhone = targetPhone || resolvedTargetJid.split('@')[0].split(':')[0];
+      // Check C: existing sender_name in whatsapp_chats table (e.g. someone texted as "Yuvraj Sharma")
+      if (!resolvedTargetJid && !targetPhone) {
+        for (const w of searchTerms) {
+          try {
+            const chatContactRows = await query(
+              `SELECT sender_name, sender_phone, chat_jid FROM whatsapp_chats 
+               WHERE sender_name LIKE ? AND sender_name != 'Director' 
+               ORDER BY id DESC LIMIT 1`,
+              [`%${w}%`]
+            );
+            if (chatContactRows.length > 0) {
+              targetPhone = chatContactRows[0].sender_phone || chatContactRows[0].chat_jid.split('@')[0].split(':')[0];
+              resolvedTargetJid = chatContactRows[0].chat_jid;
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (resolvedTargetJid && !targetPhone) {
+        targetPhone = resolvedTargetJid.split('@')[0].split(':')[0];
       }
 
       try {
@@ -759,18 +795,23 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
           matchedWhatsAppMessages = await query(
             `SELECT sender_name, sender_phone, message_text, timestamp, is_from_me 
              FROM whatsapp_chats 
-             WHERE chat_jid LIKE ? OR sender_phone LIKE ? OR chat_jid LIKE ? OR sender_phone LIKE ? OR sender_name LIKE ? OR message_text LIKE ?
-             ORDER BY timestamp DESC, id DESC LIMIT 35`,
-            [`%${targetPhone}%`, `%${targetPhone}%`, `%${p10}%`, `%${p10}%`, `%${cleanKeyword}%`, `%${cleanKeyword}%`]
+             WHERE chat_jid LIKE ? OR sender_phone LIKE ? OR chat_jid LIKE ? OR sender_phone LIKE ? OR sender_name LIKE ?
+             ORDER BY timestamp DESC, id DESC LIMIT ?`,
+            [`%${targetPhone}%`, `%${targetPhone}%`, `%${p10}%`, `%${p10}%`, `%${cleanKeyword}%`, queryLimit]
           );
         } else if (cleanKeyword.length > 1) {
           matchedWhatsAppMessages = await query(
             `SELECT sender_name, sender_phone, message_text, timestamp, is_from_me 
              FROM whatsapp_chats 
-             WHERE sender_name LIKE ? OR sender_phone LIKE ? OR message_text LIKE ?
-             ORDER BY timestamp DESC, id DESC LIMIT 35`,
-            [`%${cleanKeyword}%`, `%${cleanKeyword}%`, `%${cleanKeyword}%`]
+             WHERE sender_name LIKE ? OR message_text LIKE ?
+             ORDER BY timestamp DESC, id DESC LIMIT ?`,
+            [`%${cleanKeyword}%`, `%${cleanKeyword}%`, queryLimit]
           );
+        }
+
+        // Reverse so Gemini receives them in chronological order
+        if (matchedWhatsAppMessages.length > 0) {
+          matchedWhatsAppMessages.reverse();
         }
       } catch (e) {
         console.error('[WhatsApp Query Search Error]:', e);
