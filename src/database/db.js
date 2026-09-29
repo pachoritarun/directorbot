@@ -101,6 +101,19 @@ async function createTables() {
       INDEX \`idx_timestamp\` (\`timestamp\`)
     ) ENGINE=InnoDB;`,
 
+    // WhatsApp Synced Contacts Table
+    `CREATE TABLE IF NOT EXISTS \`whatsapp_contacts\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`jid\` VARCHAR(100) UNIQUE,
+      \`phone\` VARCHAR(50),
+      \`name\` VARCHAR(150),
+      \`notify\` VARCHAR(150),
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX \`idx_phone\` (\`phone\`),
+      INDEX \`idx_name\` (\`name\`)
+    ) ENGINE=InnoDB;`,
+
     // Email Summaries Table (Analyzed from Gmail API)
     `CREATE TABLE IF NOT EXISTS \`email_summaries\` (
       \`id\` INT AUTO_INCREMENT PRIMARY KEY,

@@ -101,9 +101,20 @@ export async function startDirectorSession() {
   // Listen to historical chat sync event from WhatsApp multi-device
   directorSock.ev.on('messaging-history.set', async ({ chats, contacts, messages }) => {
     console.log(`[Director WhatsApp] History sync event received: ${messages?.length || 0} messages, ${chats?.length || 0} chats, ${contacts?.length || 0} contacts`);
+    if (contacts && contacts.length > 0) {
+      await saveWhatsAppContactsBatch(contacts);
+    }
     if (messages && messages.length > 0) {
       await saveWhatsAppMessagesBatch(messages);
     }
+  });
+
+  directorSock.ev.on('contacts.upsert', async (contacts) => {
+    await saveWhatsAppContactsBatch(contacts);
+  });
+
+  directorSock.ev.on('contacts.update', async (contacts) => {
+    await saveWhatsAppContactsBatch(contacts);
   });
 
   // Listen to incoming messages SILENTLY without marking them as read!
@@ -111,6 +122,73 @@ export async function startDirectorSession() {
   directorSock.ev.on('messages.upsert', async ({ messages, type }) => {
     await saveWhatsAppMessagesBatch(messages);
   });
+}
+
+function levenshteinDistance(a, b) {
+  if (!a || !b) return (a || b).length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+/**
+ * Saves or updates WhatsApp contacts into MySQL and memory cache,
+ * and updates any whatsapp_chats rows with the real contact name.
+ */
+async function saveWhatsAppContactsBatch(contacts) {
+  if (!contacts || !Array.isArray(contacts)) return;
+
+  for (const c of contacts) {
+    if (!c || !c.id) continue;
+    const jid = c.id;
+    if (jid === 'status@broadcast' || jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) continue;
+
+    const name = c.name || c.verifiedName || c.notify || '';
+    const notify = c.notify || '';
+    const phone = jid.split('@')[0].split(':')[0];
+
+    if (name) {
+      recentDirectorContacts.set(name.toLowerCase().trim(), jid);
+      const firstName = name.split(/\s+/)[0].toLowerCase().trim();
+      if (firstName.length >= 3) {
+        recentDirectorContacts.set(firstName, jid);
+      }
+    }
+    if (notify) {
+      recentDirectorContacts.set(notify.toLowerCase().trim(), jid);
+    }
+
+    try {
+      await query(
+        `INSERT INTO whatsapp_contacts (jid, phone, name, notify)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE name = COALESCE(NULLIF(VALUES(name), ''), name), notify = COALESCE(NULLIF(VALUES(notify), ''), notify)`,
+        [jid, phone, name, notify]
+      );
+
+      // Backfill whatsapp_chats where sender_name is currently just the raw phone number
+      if (name) {
+        await query(
+          `UPDATE whatsapp_chats SET sender_name = ? WHERE (chat_jid LIKE ? OR sender_phone = ?) AND is_from_me = FALSE AND (sender_name = sender_phone OR sender_name IS NULL OR sender_name = '')`,
+          [name, `%${phone}%`, phone]
+        );
+      }
+    } catch (err) {}
+  }
 }
 
 /**
@@ -632,20 +710,70 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
 
     // Search historical WhatsApp messages if Director asks about chats, texts, or a specific person
     let matchedWhatsAppMessages = [];
-    const isWaQuery = lowerText.includes('whatsapp') || lowerText.includes('chat') || lowerText.includes('text') || lowerText.includes('message') || lowerText.includes('kaha') || lowerText.includes('bheja');
+    const isWaQuery = lowerText.includes('whatsapp') || lowerText.includes('chat') || lowerText.includes('text') || lowerText.includes('message') || lowerText.includes('kaha') || lowerText.includes('bheja') || lowerText.includes('said') || lowerText.includes('bol');
     if (isWaQuery) {
-      const stopWordsWa = /\b(find|search|check|look for|show me|give me|get me|the|whatsapp|chat|chats|text|texts|message|messages|msg|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
-      const cleanKeyword = text.replace(stopWordsWa, ' ').replace(/[?!,;'"()[\]{}<>*#~]/g, ' ').replace(/\s+/g, ' ').trim();
-      if (cleanKeyword.length > 1) {
+      const stopWordsWa = /\b(find|search|check|look for|show me|give me|tell me|get me|the|whatsapp|chat|chats|text|texts|message|messages|msg|history|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
+      let cleanKeyword = text.replace(stopWordsWa, ' ').replace(/[?!,;'"()[\]{}<>*#~]/g, ' ').replace(/\s+/g, ' ').trim();
+      
+      let resolvedTargetJid = null;
+      let targetPhone = null;
+
+      // Check if cleanKeyword or any word in cleanKeyword matches a cached contact (e.g. "yuvraj", "yuraj")
+      const words = cleanKeyword.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
+      for (const w of words) {
+        if (recentDirectorContacts.has(w)) {
+          resolvedTargetJid = recentDirectorContacts.get(w);
+          break;
+        }
+        // Fuzzy match: e.g. "yuraj" -> "yuvraj"
+        for (const [cName, cJid] of recentDirectorContacts.entries()) {
+          if (cName.includes(w) || w.includes(cName) || levenshteinDistance(w, cName) <= 2) {
+            resolvedTargetJid = cJid;
+            break;
+          }
+        }
+        if (resolvedTargetJid) break;
+      }
+
+      // Also search whatsapp_contacts table
+      if (!resolvedTargetJid && cleanKeyword.length >= 2) {
         try {
+          const contactRows = await query(
+            `SELECT jid, phone, name FROM whatsapp_contacts WHERE name LIKE ? OR notify LIKE ? LIMIT 1`,
+            [`%${cleanKeyword}%`, `%${cleanKeyword}%`]
+          );
+          if (contactRows.length > 0) {
+            resolvedTargetJid = contactRows[0].jid;
+            targetPhone = contactRows[0].phone;
+          }
+        } catch (e) {}
+      }
+
+      if (resolvedTargetJid) {
+        targetPhone = targetPhone || resolvedTargetJid.split('@')[0].split(':')[0];
+      }
+
+      try {
+        if (targetPhone) {
+          const p10 = targetPhone.slice(-10);
+          matchedWhatsAppMessages = await query(
+            `SELECT sender_name, sender_phone, message_text, timestamp, is_from_me 
+             FROM whatsapp_chats 
+             WHERE chat_jid LIKE ? OR sender_phone LIKE ? OR chat_jid LIKE ? OR sender_phone LIKE ? OR sender_name LIKE ? OR message_text LIKE ?
+             ORDER BY timestamp DESC, id DESC LIMIT 35`,
+            [`%${targetPhone}%`, `%${targetPhone}%`, `%${p10}%`, `%${p10}%`, `%${cleanKeyword}%`, `%${cleanKeyword}%`]
+          );
+        } else if (cleanKeyword.length > 1) {
           matchedWhatsAppMessages = await query(
             `SELECT sender_name, sender_phone, message_text, timestamp, is_from_me 
              FROM whatsapp_chats 
              WHERE sender_name LIKE ? OR sender_phone LIKE ? OR message_text LIKE ?
-             ORDER BY id DESC LIMIT 20`,
+             ORDER BY timestamp DESC, id DESC LIMIT 35`,
             [`%${cleanKeyword}%`, `%${cleanKeyword}%`, `%${cleanKeyword}%`]
           );
-        } catch (e) {}
+        }
+      } catch (e) {
+        console.error('[WhatsApp Query Search Error]:', e);
       }
     }
 
