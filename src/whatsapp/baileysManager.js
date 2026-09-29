@@ -588,7 +588,7 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       } else if (digits.length >= 11 && digits.length <= 15) {
         targetJid = `${digits}@s.whatsapp.net`;
       } else {
-        // Look up in memory cache or database
+        // Look up in memory cache, database, or conversation history
         const cached = recentDirectorContacts.get(targetRecipient.toLowerCase());
         if (cached) {
           targetJid = cached;
@@ -600,6 +600,20 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
           );
           if (found.length > 0) {
             targetJid = found[0].chat_jid;
+          } else {
+            // Scan recent conversation history for any phone number mentioned alongside this contact name
+            const cleanTarget = targetRecipient.toLowerCase().trim();
+            for (let i = directorConversationHistory.length - 1; i >= 0; i--) {
+              const turn = directorConversationHistory[i].content || '';
+              if (turn.toLowerCase().includes(cleanTarget)) {
+                const foundDigits = turn.match(/(?:\+?\d{1,3}[-\s]?)?\(?\d{3,5}\)?[-\s]?\d{3,5}[-\s]?\d{3,5}/);
+                if (foundDigits) {
+                  const d = foundDigits[0].replace(/[^0-9]/g, '');
+                  if (d.length === 10) { targetJid = `91${d}@s.whatsapp.net`; break; }
+                  if (d.length >= 11 && d.length <= 15) { targetJid = `${d}@s.whatsapp.net`; break; }
+                }
+              }
+            }
           }
         }
       }
