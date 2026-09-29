@@ -128,7 +128,8 @@ async function createTables() {
       \`body\` TEXT NOT NULL,
       \`status\` ENUM('PENDING_VERIFICATION', 'VERIFIED_SENT', 'CANCELLED') DEFAULT 'PENDING_VERIFICATION',
       \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      \`sent_at\` TIMESTAMP NULL
+      \`sent_at\` TIMESTAMP NULL,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;`,
 
     // Daily Executive Briefings Table
@@ -139,7 +140,8 @@ async function createTables() {
       \`summary_text\` MEDIUMTEXT,
       \`edtech_news\` JSON,
       \`is_sent_to_director\` BOOLEAN DEFAULT FALSE,
-      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;`,
 
     // Activity Logs Table for Dashboard Feed
@@ -150,6 +152,7 @@ async function createTables() {
       \`message\` TEXT NOT NULL,
       \`metadata\` JSON,
       \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX \`idx_created_at\` (\`created_at\`)
     ) ENGINE=InnoDB;`
   ];
@@ -159,6 +162,24 @@ async function createTables() {
       await pool.query(tableSql);
     } catch (err) {
       console.error(`[Database Error] Error creating table:`, err.message);
+    }
+  }
+
+  // Safe ALTER TABLE migrations to ensure updated_at exists on older installations
+  const safeAlterColumns = [
+    `ALTER TABLE email_drafts ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE google_tokens ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE whatsapp_chats ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE schedules ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE briefings ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE email_summaries ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`
+  ];
+
+  for (const alterSql of safeAlterColumns) {
+    try {
+      await pool.query(alterSql);
+    } catch (err) {
+      // Column already exists or table not ready, safely ignore
     }
   }
 

@@ -268,17 +268,87 @@ function parseSendWhatsappCommand(text) {
   if (!text) return null;
   const t = text.trim();
 
-  // Pattern 1: Send text to <recipient> '<message>' or "<message>"
+  // Pattern 1: Send text to [recipient] '[message]' or "[message]"
   let m = t.match(/^(?:send\s+(?:the\s+|a\s+)?(?:text|message|msg)\s+to|text(?:\s+to)?|message(?:\s+to)?)\s+([+0-9a-zA-Z._-]+)\s*[:\s-]?\s*['"“]([\s\S]+?)['"”]$/i);
   if (m) return { to: m[1], msg: m[2].trim() };
 
-  // Pattern 2: Send text to <recipient>: <message>
+  // Pattern 2: Send text to [recipient]: [message]
   m = t.match(/^(?:send\s+(?:the\s+|a\s+)?(?:text|message|msg)\s+to|text(?:\s+to)?|message(?:\s+to)?)\s+([+0-9a-zA-Z._-]+)\s*[:\s-]\s*([\s\S]+)$/i);
   if (m) return { to: m[1], msg: m[2].trim() };
 
-  // Pattern 3: <recipient> ko text kar do / message bhejo <message>
+  // Pattern 3: [recipient] ko text kar do / message bhejo [message]
   m = t.match(/^([+0-9a-zA-Z._-]+)\s+ko\s+(?:text|message|msg)\s+(?:kar\s+do|bhejo|bhej\s+do)\s*[:\s-]?\s*['"“]?([\s\S]+?)['"”]?$/i);
   if (m) return { to: m[1], msg: m[2].trim() };
+
+  // Pattern 4: Send text to [recipient] [unquoted message]
+  m = t.match(/^(?:send\s+(?:the\s+|a\s+)?(?:text|message|msg)\s+to|text(?:\s+to)?|message(?:\s+to)?)\s+([+0-9a-zA-Z._-]+)\s+([\s\S]+)$/i);
+  if (m) return { to: m[1], msg: m[2].trim().replace(/^['"“]|['"”]$/g, '') };
+
+  // Pattern 5: Number first + explanation + send text command:
+  // e.g. "9309313044 this is yuvraj number send text kaha hai kutte"
+  m = t.match(/(?:\+?91|0)?([6-9]\d{9})[\s\S]*?(?:send(?:\s+a|\s+the)?\s+(?:text|message|msg)|text|message)\s*[:\s-]?\s*['"“]?([\s\S]+?)['"”]?$/i);
+  if (m) return { to: m[1], msg: m[2].trim() };
+
+  return null;
+}
+
+/**
+ * Resolves a recipient identifier (phone number, name, cached alias) to a valid WhatsApp JID
+ */
+async function resolveRecipientJid(targetRecipient) {
+  if (!targetRecipient) return null;
+  const digits = targetRecipient.replace(/[^0-9]/g, '');
+
+  if (targetRecipient.includes('@s.whatsapp.net')) {
+    return targetRecipient;
+  }
+  if (digits.length === 10) {
+    return `91${digits}@s.whatsapp.net`;
+  }
+  if (digits.length >= 11 && digits.length <= 15) {
+    return `${digits}@s.whatsapp.net`;
+  }
+
+  // Look up in memory cache
+  const cleanTarget = targetRecipient.toLowerCase().trim();
+  const cached = recentDirectorContacts.get(cleanTarget);
+  if (cached) return cached;
+
+  // Search in database whatsapp_chats
+  try {
+    const found = await query(
+      `SELECT chat_jid, sender_name FROM whatsapp_chats 
+       WHERE sender_name LIKE ? OR sender_phone LIKE ? ORDER BY id DESC LIMIT 1`,
+      [`%${cleanTarget}%`, `%${cleanTarget}%`]
+    );
+    if (found.length > 0) {
+      return found[0].chat_jid;
+    }
+  } catch (e) {}
+
+  // Scan recent conversation history for any phone number mentioned with this contact
+  for (let i = directorConversationHistory.length - 1; i >= 0; i--) {
+    const turn = directorConversationHistory[i].content || '';
+    if (turn.toLowerCase().includes(cleanTarget) || cleanTarget.includes(turn.toLowerCase())) {
+      const foundDigits = turn.match(/(?:\+?\d{1,3}[-\s]?)?\(?\d{3,5}\)?[-\s]?\d{3,5}[-\s]?\d{3,5}/);
+      if (foundDigits) {
+        const d = foundDigits[0].replace(/[^0-9]/g, '');
+        if (d.length === 10) return `91${d}@s.whatsapp.net`;
+        if (d.length >= 11 && d.length <= 15) return `${d}@s.whatsapp.net`;
+      }
+    }
+  }
+
+  // If there is any recent 10-digit number in the conversation history
+  for (let i = directorConversationHistory.length - 1; i >= 0; i--) {
+    const turn = directorConversationHistory[i].content || '';
+    const foundDigits = turn.match(/(?:\+?\d{1,3}[-\s]?)?\(?\d{3,5}\)?[-\s]?\d{3,5}[-\s]?\d{3,5}/);
+    if (foundDigits) {
+      const d = foundDigits[0].replace(/[^0-9]/g, '');
+      if (d.length === 10) return `91${d}@s.whatsapp.net`;
+      if (d.length >= 11 && d.length <= 15) return `${d}@s.whatsapp.net`;
+    }
+  }
 
   return null;
 }
@@ -454,6 +524,41 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       }
     }
 
+    // Direct command check (e.g. "Send text to yuvraj kaha hai kutte", "9309313044 this is yuvraj number send text kaha hai kutte")
+    const directCmd = parseSendWhatsappCommand(text);
+    if (directCmd) {
+      const targetRecipient = directCmd.to;
+      const messageToSend = directCmd.msg;
+
+      const targetJid = await resolveRecipientJid(targetRecipient);
+      if (targetJid && directorSock) {
+        try {
+          await directorSock.sendMessage(targetJid, { text: messageToSend });
+          const displayTarget = targetRecipient.includes('@') ? targetRecipient.split('@')[0] : targetRecipient;
+          await botSock.sendMessage(jid, {
+            text: `✅ *Message sent to ${displayTarget} from your Director WhatsApp account:*\n"${messageToSend}"`
+          });
+          return;
+        } catch (sendErr) {
+          console.error('[Director WA Send Error]:', sendErr);
+          await botSock.sendMessage(jid, {
+            text: `❌ Failed to deliver message from Director WhatsApp to ${targetRecipient}: ${sendErr.message}`
+          });
+          return;
+        }
+      } else if (!directorSock) {
+        await botSock.sendMessage(jid, {
+          text: `⚠️ *Director WhatsApp account is currently disconnected.* Please scan/connect Director WhatsApp in the dashboard before sending messages.`
+        });
+        return;
+      } else {
+        await botSock.sendMessage(jid, {
+          text: `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact 10-digit mobile number.`
+        });
+        return;
+      }
+    }
+
     const recentChats = await query(
       `SELECT sender_name, sender_phone, message_text, timestamp FROM whatsapp_chats 
        WHERE is_from_me = FALSE ORDER BY id DESC LIMIT 25`
@@ -576,47 +681,8 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       const targetRecipient = replyMatch[1].trim();
       const messageToSend = replyMatch[2].trim();
 
-      // Resolve recipient JID: Direct Phone Number > Cache > Database
-      let targetJid = null;
-      const digits = targetRecipient.replace(/[^0-9]/g, '');
-
-      if (targetRecipient.includes('@s.whatsapp.net')) {
-        targetJid = targetRecipient;
-      } else if (digits.length === 10) {
-        // Standard 10-digit mobile (prepend 91 country code)
-        targetJid = `91${digits}@s.whatsapp.net`;
-      } else if (digits.length >= 11 && digits.length <= 15) {
-        targetJid = `${digits}@s.whatsapp.net`;
-      } else {
-        // Look up in memory cache, database, or conversation history
-        const cached = recentDirectorContacts.get(targetRecipient.toLowerCase());
-        if (cached) {
-          targetJid = cached;
-        } else {
-          const found = await query(
-            `SELECT chat_jid, sender_name FROM whatsapp_chats 
-             WHERE sender_name LIKE ? OR sender_phone LIKE ? ORDER BY id DESC LIMIT 1`,
-            [`%${targetRecipient}%`, `%${targetRecipient}%`]
-          );
-          if (found.length > 0) {
-            targetJid = found[0].chat_jid;
-          } else {
-            // Scan recent conversation history for any phone number mentioned alongside this contact name
-            const cleanTarget = targetRecipient.toLowerCase().trim();
-            for (let i = directorConversationHistory.length - 1; i >= 0; i--) {
-              const turn = directorConversationHistory[i].content || '';
-              if (turn.toLowerCase().includes(cleanTarget)) {
-                const foundDigits = turn.match(/(?:\+?\d{1,3}[-\s]?)?\(?\d{3,5}\)?[-\s]?\d{3,5}[-\s]?\d{3,5}/);
-                if (foundDigits) {
-                  const d = foundDigits[0].replace(/[^0-9]/g, '');
-                  if (d.length === 10) { targetJid = `91${d}@s.whatsapp.net`; break; }
-                  if (d.length >= 11 && d.length <= 15) { targetJid = `${d}@s.whatsapp.net`; break; }
-                }
-              }
-            }
-          }
-        }
-      }
+      // Resolve recipient JID: Direct Phone Number > Cache > Database > Conversation History
+      const targetJid = await resolveRecipientJid(targetRecipient);
 
       if (targetJid && directorSock) {
         try {
@@ -634,6 +700,11 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
           });
           return;
         }
+      } else if (!directorSock) {
+        await botSock.sendMessage(jid, {
+          text: `⚠️ *Director WhatsApp account is currently disconnected.* Please scan/connect Director WhatsApp in the dashboard before sending messages.`
+        });
+        return;
       } else {
         await botSock.sendMessage(jid, {
           text: `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact 10-digit mobile number.`
