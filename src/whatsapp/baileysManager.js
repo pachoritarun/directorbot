@@ -260,6 +260,29 @@ export async function startBotSession() {
 /**
  * Handles incoming interactions on the Executive Bot number
  */
+
+/**
+ * Direct deterministic parser for Director's command to send a WhatsApp message
+ */
+function parseSendWhatsappCommand(text) {
+  if (!text) return null;
+  const t = text.trim();
+
+  // Pattern 1: Send text to <recipient> '<message>' or "<message>"
+  let m = t.match(/^(?:send\s+(?:the\s+|a\s+)?(?:text|message|msg)\s+to|text(?:\s+to)?|message(?:\s+to)?)\s+([+0-9a-zA-Z._-]+)\s*[:\s-]?\s*['"“]([\s\S]+?)['"”]$/i);
+  if (m) return { to: m[1], msg: m[2].trim() };
+
+  // Pattern 2: Send text to <recipient>: <message>
+  m = t.match(/^(?:send\s+(?:the\s+|a\s+)?(?:text|message|msg)\s+to|text(?:\s+to)?|message(?:\s+to)?)\s+([+0-9a-zA-Z._-]+)\s*[:\s-]\s*([\s\S]+)$/i);
+  if (m) return { to: m[1], msg: m[2].trim() };
+
+  // Pattern 3: <recipient> ko text kar do / message bhejo <message>
+  m = t.match(/^([+0-9a-zA-Z._-]+)\s+ko\s+(?:text|message|msg)\s+(?:kar\s+do|bhejo|bhej\s+do)\s*[:\s-]?\s*['"“]?([\s\S]+?)['"”]?$/i);
+  if (m) return { to: m[1], msg: m[2].trim() };
+
+  return null;
+}
+
 async function handleBotIncomingMessage(jid, senderPhone, text) {
   try {
     const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE || '';
