@@ -499,6 +499,65 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     }
 
     // --- Natural AI Conversation with Context ---
+    const lowerText = text.toLowerCase().trim();
+
+    // Check if Director just sent a phone number in response to a previous contact query
+    const standalonePhoneMatch = text.trim().match(/^(?:\+?91|0)?([6-9]\d{9})$/);
+    if (standalonePhoneMatch) {
+      const phoneDigits = standalonePhoneMatch[1];
+      const formattedJid = `91${phoneDigits}@s.whatsapp.net`;
+
+      // Find the contact name or pending message from recent conversation history
+      let contactName = null;
+      let pendingMessage = null;
+
+      for (let i = directorConversationHistory.length - 1; i >= 0; i--) {
+        const turn = directorConversationHistory[i];
+        if (turn.role === 'assistant' && turn.content.includes('Could not find WhatsApp contact for')) {
+          const m = turn.content.match(/Could not find WhatsApp contact for\s*["“']([^"”']+)["”']/i);
+          if (m) contactName = m[1].toLowerCase().trim();
+        }
+        if (turn.role === 'user') {
+          const prevDirectCmd = parseSendWhatsappCommand(turn.content);
+          if (prevDirectCmd && prevDirectCmd.msg) {
+            pendingMessage = prevDirectCmd.msg;
+            if (!contactName) contactName = prevDirectCmd.to.toLowerCase().trim();
+            break;
+          }
+        }
+      }
+
+      if (contactName) {
+        recentDirectorContacts.set(contactName, formattedJid);
+        console.log(`[Contact Cache] Linked contact "${contactName}" -> ${formattedJid}`);
+      }
+
+      if (pendingMessage && directorSock) {
+        try {
+          await directorSock.sendMessage(formattedJid, { text: pendingMessage });
+          await botSock.sendMessage(jid, {
+            text: `✅ ${contactName ? `*Contact "${contactName}" linked to ${phoneDigits}!*\n\n` : ''}*Message sent to ${phoneDigits} from your Director WhatsApp account:*\n"${pendingMessage}"`
+          });
+          directorConversationHistory.push({ role: 'user', content: text });
+          directorConversationHistory.push({ role: 'assistant', content: `Message sent to ${phoneDigits}: "${pendingMessage}"` });
+          return;
+        } catch (sendErr) {
+          console.error('[Director WA Send Error]:', sendErr);
+          await botSock.sendMessage(jid, {
+            text: `❌ Error sending message to ${phoneDigits}: ${sendErr.message}`
+          });
+          return;
+        }
+      } else {
+        await botSock.sendMessage(jid, {
+          text: `✅ *Noted!* ${contactName ? `Contact "${contactName}"` : 'Phone number'} saved as *${phoneDigits}*.\n\nWhat message would you like me to send them from your Director WhatsApp?`
+        });
+        directorConversationHistory.push({ role: 'user', content: text });
+        directorConversationHistory.push({ role: 'assistant', content: `Saved phone number ${phoneDigits} for ${contactName || 'contact'}.` });
+        return;
+      }
+    }
+
     // 1. Gather Context (Both today and upcoming schedules)
     const todayStr = new Date().toISOString().split('T')[0];
     const schedules = await getUpcomingSchedules();
@@ -538,6 +597,8 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
           await botSock.sendMessage(jid, {
             text: `✅ *Message sent to ${displayTarget} from your Director WhatsApp account:*\n"${messageToSend}"`
           });
+          directorConversationHistory.push({ role: 'user', content: text });
+          directorConversationHistory.push({ role: 'assistant', content: `Message sent to ${displayTarget}: "${messageToSend}"` });
           return;
         } catch (sendErr) {
           console.error('[Director WA Send Error]:', sendErr);
@@ -552,9 +613,10 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
         });
         return;
       } else {
-        await botSock.sendMessage(jid, {
-          text: `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact 10-digit mobile number.`
-        });
+        const errorMsg = `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact 10-digit mobile number.`;
+        await botSock.sendMessage(jid, { text: errorMsg });
+        directorConversationHistory.push({ role: 'user', content: text });
+        directorConversationHistory.push({ role: 'assistant', content: errorMsg });
         return;
       }
     }
@@ -594,7 +656,6 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
 
     // Live search Gmail if user query inquires about emails, people, or entities
     let matchedEmails = [];
-    const lowerText = text.toLowerCase();
     const isEmailSearch = lowerText.includes('email') || 
                           lowerText.includes('mail') || 
                           lowerText.includes('find') || 
