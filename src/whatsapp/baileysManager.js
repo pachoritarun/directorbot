@@ -454,10 +454,39 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       return;
     }
 
-    // --- Briefing on Demand Command ---
-    if (text.toLowerCase().trim() === '!briefing') {
-      await botSock.sendMessage(jid, { text: `⏳ Generating Executive Daily Briefing PDF... Please wait a moment.` });
-      await triggerDailyBriefing(jid);
+    const lowerText = text.toLowerCase().trim();
+
+    // --- Briefing & PDF Report on Demand Command ---
+    const isBriefingRequest = 
+      lowerText === '!briefing' ||
+      /\b(briefing|report|pdf)\b/i.test(lowerText) && /\b(give|send|share|show|bhejo|lao|do|here|get|generate|provide|want|need|de|dikha)\b/i.test(lowerText) ||
+      lowerText === 'give me pdf' ||
+      lowerText === 'give ne the report' ||
+      lowerText === 'give me the report' ||
+      lowerText === 'give me report' ||
+      lowerText === 'give me here' ||
+      lowerText === 'give here' ||
+      lowerText === 'send here' ||
+      lowerText === 'send me pdf' ||
+      lowerText === 'send me report' ||
+      lowerText === 'send pdf' ||
+      lowerText === 'pdf bhejo' ||
+      lowerText === 'report bhejo' ||
+      lowerText === 'today report' ||
+      lowerText === 'report' ||
+      lowerText === 'pdf' ||
+      ((lowerText.includes('here') || lowerText.includes('yahi') || lowerText.includes('idhar')) && directorConversationHistory.some(h => (h.content || '').toLowerCase().includes('pdf') || (h.content || '').toLowerCase().includes('briefing')));
+
+    if (isBriefingRequest) {
+      await botSock.sendMessage(jid, { 
+        text: `⏳ *Generating your real-time Executive Daily Briefing PDF...*\nCompiling the latest schedules, email correspondence, and WhatsApp intelligence right now. Dispatching the PDF document here shortly...` 
+      });
+      const result = await triggerDailyBriefing(jid);
+      if (result && !result.success) {
+        await botSock.sendMessage(jid, {
+          text: `⚠️ *Briefing generation encountered an issue:* ${result.error || 'Unknown error'}`
+        });
+      }
       return;
     }
 
@@ -499,7 +528,6 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     }
 
     // --- Natural AI Conversation with Context ---
-    const lowerText = text.toLowerCase().trim();
 
     // Check if Director just sent a phone number in response to a previous contact query
     const standalonePhoneMatch = text.trim().match(/^(?:\+?91|0)?([6-9]\d{9})$/);
@@ -819,6 +847,20 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       return;
     }
 
+    // Check if AI requested Briefing PDF delivery
+    if (aiReply.includes('[ACTION:SEND_BRIEFING_PDF]')) {
+      const cleanReply = aiReply.replace(/\[ACTION:SEND_BRIEFING_PDF\]/gi, '').trim();
+      if (cleanReply) {
+        await botSock.sendMessage(jid, { text: cleanReply });
+      } else {
+        await botSock.sendMessage(jid, { 
+          text: `⏳ *Generating your real-time Executive Briefing PDF Report...*\nCompiling latest intelligence and dispatching the PDF document here shortly.` 
+        });
+      }
+      await triggerDailyBriefing(jid);
+      return;
+    }
+
     // Regular AI response
     await botSock.sendMessage(jid, { text: aiReply });
   } catch (err) {
@@ -840,11 +882,16 @@ export async function triggerDailyBriefing(targetJid = null) {
   const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE || '';
   const cleanDir = directorPhone.replace(/[^0-9]/g, '');
 
-  // SECURITY: The confidential Executive Briefing PDF and summary MUST ONLY be delivered to the verified Director phone!
-  // Never dispatch to arbitrary numbers, friends, or groups.
-  let recipientJid = null;
-  if (cleanDir && cleanDir.length >= 10) {
+  // SECURITY: Deliver to verified Director phone or requested target
+  let recipientJid = targetJid;
+  if (!recipientJid && cleanDir && cleanDir.length >= 10) {
     recipientJid = `${cleanDir}@s.whatsapp.net`;
+  }
+  if (!recipientJid && directorSock?.user?.id) {
+    const rawId = directorSock.user.id.split('@')[0].split(':')[0];
+    if (rawId.length >= 10) {
+      recipientJid = `${rawId}@s.whatsapp.net`;
+    }
   }
 
   try {
