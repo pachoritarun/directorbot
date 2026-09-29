@@ -31,6 +31,8 @@ let isManualDisconnectDirector = false;
 let isManualDisconnectBot = false;
 
 let ioInstance = null;
+const recentDirectorContacts = new Map(); // e.g. 'yuvraj' -> '919309313044@s.whatsapp.net'
+const directorConversationHistory = []; // sliding window of recent conversation turns with Director
 
 export function setSocketIO(io) {
   ioInstance = io;
@@ -133,6 +135,43 @@ export async function startDirectorSession() {
       }
     }
   });
+}
+
+/**
+ * Batch saves incoming or synced historical WhatsApp messages into MySQL
+ */
+async function saveWhatsAppMessagesBatch(messages) {
+  if (!messages || !Array.isArray(messages)) return;
+
+  for (const msg of messages) {
+    if (!msg.message) continue;
+    const jid = msg.key.remoteJid;
+    if (!jid || jid === 'status@broadcast' || jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) continue;
+
+    const isFromMe = msg.key.fromMe || false;
+    const senderName = msg.pushName || (isFromMe ? 'Director' : jid.split('@')[0]);
+    const senderPhone = jid.split('@')[0];
+    const timestamp = typeof msg.messageTimestamp === 'object' && msg.messageTimestamp?.low
+      ? msg.messageTimestamp.low
+      : (Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000));
+
+    const text = msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      msg.message.imageMessage?.caption ||
+      msg.message.videoMessage?.caption ||
+      '';
+
+    if (!text.trim()) continue;
+
+    try {
+      await query(
+        `INSERT INTO whatsapp_chats (msg_id, chat_jid, sender_name, sender_phone, message_text, timestamp, is_from_me)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE message_text = VALUES(message_text)`,
+        [msg.key.id, jid, senderName, senderPhone, text, timestamp, isFromMe]
+      );
+    } catch (err) {}
+  }
 }
 
 /**
@@ -371,10 +410,50 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     const todayStr = new Date().toISOString().split('T')[0];
     const schedules = await getUpcomingSchedules();
 
+    // Extract any phone numbers mentioned in Director's message to cache
+    const phoneExtractRegex = /(?:\+?\d{1,3}[-\s]?)?\(?\d{3,5}\)?[-\s]?\d{3,5}[-\s]?\d{3,5}/g;
+    const extractedPhones = text.match(phoneExtractRegex);
+    if (extractedPhones) {
+      for (const rawP of extractedPhones) {
+        const pDigits = rawP.replace(/[^0-9]/g, '');
+        if (pDigits.length >= 10) {
+          const formattedJid = pDigits.length === 10 ? `91${pDigits}@s.whatsapp.net` : `${pDigits}@s.whatsapp.net`;
+          // Look for preceding or following words as name
+          const words = text.replace(rawP, ' ').split(/\s+/).filter(w => w.length > 2);
+          for (const w of words) {
+            const cleanW = w.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (cleanW && !['this', 'is', 'the', 'number', 'of', 'text', 'send', 'call', 'kaha', 'hai'].includes(cleanW)) {
+              recentDirectorContacts.set(cleanW, formattedJid);
+              console.log(`[Contact Cache] Linked contact "${cleanW}" -> ${formattedJid}`);
+            }
+          }
+        }
+      }
+    }
+
     const recentChats = await query(
       `SELECT sender_name, sender_phone, message_text, timestamp FROM whatsapp_chats 
-       WHERE is_from_me = FALSE ORDER BY id DESC LIMIT 20`
+       WHERE is_from_me = FALSE ORDER BY id DESC LIMIT 25`
     );
+
+    // Search historical WhatsApp messages if Director asks about chats, texts, or a specific person
+    let matchedWhatsAppMessages = [];
+    const isWaQuery = lowerText.includes('whatsapp') || lowerText.includes('chat') || lowerText.includes('text') || lowerText.includes('message') || lowerText.includes('kaha') || lowerText.includes('bheja');
+    if (isWaQuery) {
+      const stopWordsWa = /\b(find|search|check|look for|show me|give me|get me|the|whatsapp|chat|chats|text|texts|message|messages|msg|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
+      const cleanKeyword = text.replace(stopWordsWa, ' ').replace(/[?!,;'"()[\]{}<>*#~]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (cleanKeyword.length > 1) {
+        try {
+          matchedWhatsAppMessages = await query(
+            `SELECT sender_name, sender_phone, message_text, timestamp, is_from_me 
+             FROM whatsapp_chats 
+             WHERE sender_name LIKE ? OR sender_phone LIKE ? OR message_text LIKE ?
+             ORDER BY id DESC LIMIT 20`,
+            [`%${cleanKeyword}%`, `%${cleanKeyword}%`, `%${cleanKeyword}%`]
+          );
+        } catch (e) {}
+      }
+    }
 
     const recentEmails = await query(
       `SELECT sender_name, subject, summary, priority, action_required FROM email_summaries 
@@ -454,11 +533,18 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
 
     const aiReply = await handleDirectorChat(text, {
       schedules,
-      whatsappMessages: recentChats,
+      whatsappMessages: matchedWhatsAppMessages.length > 0 ? matchedWhatsAppMessages : recentChats,
+      matchedWhatsAppMessages,
       recentEmails,
       matchedEmails,
-      pendingDrafts
+      pendingDrafts,
+      conversationHistory: directorConversationHistory.slice(-6)
     });
+
+    // Append to directorConversationHistory
+    directorConversationHistory.push({ role: 'user', content: text });
+    directorConversationHistory.push({ role: 'assistant', content: aiReply });
+    if (directorConversationHistory.length > 12) directorConversationHistory.splice(0, 2);
 
     // Check if AI generated an action block
     // Format: [ACTION:WHATSAPP_REPLY | TO:recipient | MESSAGE:text]
@@ -467,31 +553,53 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
       const targetRecipient = replyMatch[1].trim();
       const messageToSend = replyMatch[2].trim();
 
-      // Find recipient JID from database or phone
+      // Resolve recipient JID: Direct Phone Number > Cache > Database
       let targetJid = null;
+      const digits = targetRecipient.replace(/[^0-9]/g, '');
+
       if (targetRecipient.includes('@s.whatsapp.net')) {
         targetJid = targetRecipient;
+      } else if (digits.length === 10) {
+        // Standard 10-digit mobile (prepend 91 country code)
+        targetJid = `91${digits}@s.whatsapp.net`;
+      } else if (digits.length >= 11 && digits.length <= 15) {
+        targetJid = `${digits}@s.whatsapp.net`;
       } else {
-        const found = await query(
-          `SELECT chat_jid, sender_name FROM whatsapp_chats 
-           WHERE sender_name LIKE ? OR sender_phone LIKE ? ORDER BY id DESC LIMIT 1`,
-          [`%${targetRecipient}%`, `%${targetRecipient}%`]
-        );
-        if (found.length > 0) {
-          targetJid = found[0].chat_jid;
+        // Look up in memory cache or database
+        const cached = recentDirectorContacts.get(targetRecipient.toLowerCase());
+        if (cached) {
+          targetJid = cached;
+        } else {
+          const found = await query(
+            `SELECT chat_jid, sender_name FROM whatsapp_chats 
+             WHERE sender_name LIKE ? OR sender_phone LIKE ? ORDER BY id DESC LIMIT 1`,
+            [`%${targetRecipient}%`, `%${targetRecipient}%`]
+          );
+          if (found.length > 0) {
+            targetJid = found[0].chat_jid;
+          }
         }
       }
 
       if (targetJid && directorSock) {
-        await directorSock.sendMessage(targetJid, { text: messageToSend });
-        const cleanReply = aiReply.replace(replyMatch[0], '').trim();
-        await botSock.sendMessage(jid, {
-          text: `${cleanReply}\n\n✅ *Message sent to ${targetRecipient} from your Director WhatsApp account:* "${messageToSend}"`
-        });
-        return;
+        try {
+          await directorSock.sendMessage(targetJid, { text: messageToSend });
+          const cleanReply = aiReply.replace(replyMatch[0], '').trim();
+          const displayTarget = targetRecipient.includes('@') ? targetRecipient.split('@')[0] : targetRecipient;
+          await botSock.sendMessage(jid, {
+            text: `${cleanReply ? `${cleanReply}\n\n` : ''}✅ *Message sent to ${displayTarget} from your Director WhatsApp account:*\n"${messageToSend}"`
+          });
+          return;
+        } catch (sendErr) {
+          console.error('[Director WA Send Error]:', sendErr);
+          await botSock.sendMessage(jid, {
+            text: `❌ Failed to deliver message from Director WhatsApp to ${targetRecipient}: ${sendErr.message}`
+          });
+          return;
+        }
       } else {
         await botSock.sendMessage(jid, {
-          text: `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact phone number.`
+          text: `⚠️ Could not find WhatsApp contact for "${targetRecipient}". Please provide their exact 10-digit mobile number.`
         });
         return;
       }
@@ -598,10 +706,15 @@ export async function triggerDailyBriefing(targetJid = null) {
     const whatsappSummary = await summarizeWhatsAppChats(recentChats);
 
     // 4. Query recently sent email drafts or resolved actions
-    const sentDrafts = await query(
-      `SELECT recipient_email, subject, body, updated_at FROM email_drafts 
-       WHERE status = 'SENT' ORDER BY id DESC LIMIT 5`
-    );
+    let sentDrafts = [];
+    try {
+      sentDrafts = await query(
+        `SELECT recipient_email, subject, body, sent_at FROM email_drafts 
+         WHERE status = 'VERIFIED_SENT' ORDER BY id DESC LIMIT 5`
+      );
+    } catch (e) {
+      sentDrafts = [];
+    }
 
     // 5. Curate EdTech & AI News
     const edTechNews = await getEdTechAndAiNews();

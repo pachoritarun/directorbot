@@ -272,6 +272,8 @@ Current Context Available:
 - Recent Important Emails: ${JSON.stringify(context.recentEmails || [])}
 - Emails Found via Live Gmail Search (Read & Unread): ${JSON.stringify(context.matchedEmails || [])}
 - Pending Email Drafts: ${JSON.stringify(context.pendingDrafts || [])}
+- Recent Chat Conversation History with Director: ${JSON.stringify(context.conversationHistory || [])}
+- WhatsApp Historical Messages Matching Query: ${JSON.stringify(context.matchedWhatsAppMessages || [])}
 
 Director's Message / Query: "${query}"
 
@@ -284,10 +286,16 @@ Instructions:
    - Compare the query date against "Today's Date" and "Tomorrow's Date".
    - Check "Scheduled Meetings (Today & Upcoming)" for matching dates.
    - If a meeting exists for tomorrow (e.g. "Meeting with Yuvraj"), tell the Director immediately with time, agenda, and details!
-3. If the Director is asking about a person's WhatsApp message (e.g., "Tarun ne kya text kiya?"), check WhatsApp messages and give a concise summary.
-4. If the Director wants to reply to someone on WhatsApp (e.g. "Reply to Tarun: meet me at 4 PM"):
-   Recognize the intent and specify an action block:
-   [ACTION:WHATSAPP_REPLY | TO:recipient_name_or_phone | MESSAGE:reply_content]
+3. If the Director asks about old/past WhatsApp messages, or what someone texted on WhatsApp (e.g., 'Can you read old chats?', 'Tarun ne kya text kiya?', 'Check WhatsApp messages from Yuvraj'):
+   - Check 'WhatsApp Historical Messages Matching Query' and 'Recent WhatsApp Messages'.
+   - If past messages exist, summarize them factually with sender, date/time, and content.
+   - If no messages are found for that person in database, answer: 'Sir, our local WhatsApp history database currently has no saved messages from [Name]. When Director WhatsApp is linked, recent past messages synced by WhatsApp are archived here for instant lookup.'
+4. If the Director wants to text or message someone on WhatsApp (e.g. 'Send the text to yuvraj "kaha hai kutte"', '9309313044 text him...'):
+   - Look at Director's query AND 'Recent Chat Conversation History with Director' to identify the recipient!
+   - If the Director previously gave a phone number or name (e.g. Yuvraj -> 9309313044), DO NOT switch to other people! Use that phone number or person!
+   - Output an action block:
+   [ACTION:WHATSAPP_REPLY | TO:phone_number_or_name | MESSAGE:reply_content]
+   Example: [ACTION:WHATSAPP_REPLY | TO:9309313044 | MESSAGE:kaha hai kutte]
 5. If the Director wants to send an email (e.g. "Tarun ko email bhej do...", "Send email to..."):
    NEVER say the email is already sent! Prepare the draft and output:
    [ACTION:DRAFT_EMAIL | TO:recipient_email | SUBJECT:subject_line | BODY:body_content]
