@@ -712,27 +712,36 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
     let matchedWhatsAppMessages = [];
     const isWaQuery = lowerText.includes('whatsapp') || lowerText.includes('chat') || lowerText.includes('text') || lowerText.includes('message') || lowerText.includes('kaha') || lowerText.includes('bheja') || lowerText.includes('said') || lowerText.includes('bol');
     if (isWaQuery) {
-      // 1. Extract any numeric limit (e.g. "last 10 chat", "5 messages")
+      // 1. Extract any numeric limit (e.g. "last 20 chat", "5 messages")
       let queryLimit = 30;
       const numMatch = text.match(/\b(\d{1,2})\b/);
       if (numMatch) {
         queryLimit = Math.max(1, Math.min(50, parseInt(numMatch[1], 10)));
       }
 
-      // 2. Strip numbers, stop words, and punctuation to isolate the person's name / query term
-      const stopWordsWa = /\b(find|search|check|look for|show me|give me|tell me|get me|the|whatsapp|chat|chats|text|texts|message|messages|msg|history|recent|recently|today|yesterday|last|new|old|regarding|about|related to|of|from|to|for|with|bheja|aaya|kya|hai|tha|thi|the|se|ko|ka|ki|ke|kuch|koi|bhi|wala|wali|wale|me|mein|please|plz|sir|assistant|is|are|any)\b/gi;
-      let cleanKeyword = text
-        .replace(/\b\d+\b/g, ' ')
-        .replace(stopWordsWa, ' ')
-        .replace(/[?!,;'"()[\]{}<>*#~]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      // 2. Tokenize into clean words, stripping punctuation, dots, numbers, and common stop words
+      const stopWordsList = new Set([
+        'give', 'me', 'tell', 'show', 'find', 'search', 'check', 'look', 'what', 'when', 'where', 'how', 'who',
+        'chat', 'chats', 'text', 'texts', 'message', 'messages', 'msg', 'msgs', 'history', 'conversation',
+        'summary', 'summarize', 'detail', 'details', 'recent', 'recently', 'today', 'yesterday', 'tomorrow',
+        'last', 'latest', 'past', 'old', 'new', 'regarding', 'about', 'related', 'with', 'from', 'have',
+        'sent', 'send', 'bheja', 'bhejo', 'aaya', 'kya', 'hai', 'tha', 'thi', 'the', 'bhi', 'aur', 'wale',
+        'wali', 'wala', 'mein', 'please', 'plz', 'sir', 'assistant', 'whatsapp', 'inbox', 'mail', 'email',
+        'emails', 'here', 'there', 'this', 'that', 'them', 'they', 'their', 'said', 'says', 'bol', 'bola',
+        'ka', 'ki', 'ke', 'ko', 'se', 'do', 'de', 'dikha', 'dikhao', 'sunao', 'batao'
+      ]);
+
+      const normalizedTokens = text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 2 && !stopWordsList.has(w) && !/^\d+$/.test(w));
+
+      const cleanKeyword = normalizedTokens.join(' ').trim();
+      const searchTerms = [cleanKeyword, ...normalizedTokens].filter(Boolean);
       
       let resolvedTargetJid = null;
       let targetPhone = null;
-
-      const targetWords = cleanKeyword.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
-      const searchTerms = [cleanKeyword, ...targetWords].filter(Boolean);
 
       // Check A: recentDirectorContacts memory map (exact & fuzzy)
       for (const w of searchTerms) {
@@ -795,9 +804,9 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
           matchedWhatsAppMessages = await query(
             `SELECT sender_name, sender_phone, message_text, timestamp, is_from_me 
              FROM whatsapp_chats 
-             WHERE chat_jid LIKE ? OR sender_phone LIKE ? OR chat_jid LIKE ? OR sender_phone LIKE ? OR sender_name LIKE ?
+             WHERE chat_jid LIKE ? OR sender_phone LIKE ? OR chat_jid LIKE ? OR sender_phone LIKE ? OR sender_name LIKE ? OR message_text LIKE ?
              ORDER BY timestamp DESC, id DESC LIMIT ?`,
-            [`%${targetPhone}%`, `%${targetPhone}%`, `%${p10}%`, `%${p10}%`, `%${cleanKeyword}%`, queryLimit]
+            [`%${targetPhone}%`, `%${targetPhone}%`, `%${p10}%`, `%${p10}%`, `%${cleanKeyword}%`, `%${cleanKeyword}%`, queryLimit]
           );
         } else if (cleanKeyword.length > 1) {
           matchedWhatsAppMessages = await query(
@@ -812,6 +821,7 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
         // Reverse so Gemini receives them in chronological order
         if (matchedWhatsAppMessages.length > 0) {
           matchedWhatsAppMessages.reverse();
+          console.log(`[Director Query] Retrieved ${matchedWhatsAppMessages.length} matched WhatsApp messages for "${cleanKeyword}" (targetPhone: ${targetPhone || 'NONE'})`);
         }
       } catch (e) {
         console.error('[WhatsApp Query Search Error]:', e);
