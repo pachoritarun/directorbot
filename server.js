@@ -769,26 +769,40 @@ app.get('/api/debug/search-chats', async (req, res) => {
   }
 });
 
-// --- Scheduled Daily Morning Briefing Checker ---
+// --- Scheduled Daily Morning Briefing Checker (Indian Standard Time Asia/Kolkata) ---
 let lastBriefingDate = '';
 setInterval(async () => {
   try {
-    const briefingTime = (await getSetting('BRIEFING_TIME')) || process.env.BRIEFING_TIME || '08:00';
-    const now = new Date();
-    const currentHours = String(now.getHours()).padStart(2, '0');
-    const currentMinutes = String(now.getMinutes()).padStart(2, '0');
-    const currentTimeStr = `${currentHours}:${currentMinutes}`;
-    const todayStr = now.toISOString().split('T')[0];
+    const rawSetting = (await getSetting('BRIEFING_TIME')) || process.env.BRIEFING_TIME || '08:00';
+    const targetBriefingTime = rawSetting.trim().padStart(5, '0'); // Normalizes "8:00" -> "08:00"
 
-    if (currentTimeStr === briefingTime && lastBriefingDate !== todayStr) {
+    // Indian Standard Time (IST) calculation
+    const now = new Date();
+    const timeFormatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+
+    const currentTimeStr = timeFormatter.format(now);
+    const todayStr = dateFormatter.format(now);
+
+    if (currentTimeStr === targetBriefingTime && lastBriefingDate !== todayStr) {
       lastBriefingDate = todayStr;
-      console.log(`[Auto-Briefing] Triggering daily morning briefing at ${currentTimeStr}...`);
+      console.log(`[Auto-Briefing] Target briefing time ${targetBriefingTime} IST reached (Current: ${currentTimeStr} IST on ${todayStr}). Triggering briefing...`);
       await triggerDailyBriefing();
     }
   } catch (e) {
-    // ignore
+    console.error('[Auto-Briefing Checker Error]:', e.message);
   }
-}, 60000);
+}, 15000);
 
 // --- Server Startup ---
 const PORT = process.env.PORT || 3000;

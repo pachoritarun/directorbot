@@ -1062,9 +1062,14 @@ async function handleBotIncomingMessage(jid, senderPhone, text) {
  * Triggers the Executive Daily Briefing (PDF + Highlights)
  */
 export async function triggerDailyBriefing(targetJid = null) {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(now);
+
   const directorPhone = (await getSetting('DIRECTOR_PHONE')) || process.env.DIRECTOR_PHONE || '';
-  const cleanDir = directorPhone.replace(/[^0-9]/g, '');
+  let cleanDir = directorPhone.replace(/[^0-9]/g, '');
+  if (cleanDir.length === 10) {
+    cleanDir = '91' + cleanDir;
+  }
 
   // SECURITY: Deliver to verified Director phone or requested target
   let recipientJid = targetJid;
@@ -1074,7 +1079,7 @@ export async function triggerDailyBriefing(targetJid = null) {
   if (!recipientJid && directorSock?.user?.id) {
     const rawId = directorSock.user.id.split('@')[0].split(':')[0];
     if (rawId.length >= 10) {
-      recipientJid = `${rawId}@s.whatsapp.net`;
+      recipientJid = `${rawId.length === 10 ? '91' + rawId : rawId}@s.whatsapp.net`;
     }
   }
 
@@ -1083,43 +1088,58 @@ export async function triggerDailyBriefing(targetJid = null) {
     const schedules = await getSchedulesByDate(todayStr);
 
     // 2. Fetch & Analyze Unread Emails
-    const rawEmails = await fetchUnreadEmails(12);
-    const analyzedEmails = await analyzeEmails(rawEmails);
-
-    // Store analyzed emails in MySQL
-    for (const em of analyzedEmails) {
-      try {
-        await query(
-          `INSERT INTO email_summaries (gmail_id, sender_email, sender_name, subject, snippet, date_received, priority, summary, action_required)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE priority = VALUES(priority), summary = VALUES(summary), action_required = VALUES(action_required)`,
-          [em.id, em.senderEmail || '', em.senderName || '', em.subject || '', em.snippet || '', em.date || '', em.priority, em.summary, em.action_required]
-        );
-      } catch (err) {}
+    let analyzedEmails = [];
+    try {
+      const rawEmails = await fetchUnreadEmails(12);
+      if (rawEmails && rawEmails.length > 0) {
+        analyzedEmails = await analyzeEmails(rawEmails);
+        for (const em of analyzedEmails) {
+          try {
+            await query(
+              `INSERT INTO email_summaries (gmail_id, sender_email, sender_name, subject, snippet, date_received, priority, summary, action_required)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE priority = VALUES(priority), summary = VALUES(summary), action_required = VALUES(action_required)`,
+              [em.id, em.senderEmail || '', em.senderName || '', em.subject || '', em.snippet || '', em.date || '', em.priority, em.summary, em.action_required]
+            );
+          } catch (err) {}
+        }
+      }
+    } catch (e) {
+      console.warn('[Briefing] Live email fetch error:', e.message);
     }
 
-    // 3. Summarize silent WhatsApp chats
-    const recentChats = await query(
-      `SELECT sender_name, sender_phone, message_text, timestamp FROM whatsapp_chats 
-       WHERE is_from_me = FALSE ORDER BY id DESC LIMIT 30`
-    );
-    const whatsappSummary = await summarizeWhatsAppChats(recentChats);
-
-    // 4. Query recently sent email drafts or resolved actions
-    let sentDrafts = [];
+    // Always query stored emails from database (prioritizing Urgent, excluding outgoing/self emails)
+    let storedEmails = [];
     try {
-      sentDrafts = await query(
-        `SELECT recipient_email, subject, body, sent_at FROM email_drafts 
-         WHERE status = 'VERIFIED_SENT' ORDER BY id DESC LIMIT 5`
+      storedEmails = await query(
+        `SELECT id, gmail_id, sender_email, sender_name, subject, snippet, date_received, priority, summary, action_required 
+         FROM email_summaries 
+         WHERE sender_email NOT LIKE '%amit.dheemant%' 
+         ORDER BY 
+           CASE WHEN priority = 'Urgent' THEN 1 WHEN priority = 'High' THEN 2 ELSE 3 END, 
+           id DESC 
+         LIMIT 10`
       );
     } catch (e) {
-      sentDrafts = [];
+      storedEmails = [];
     }
+    const emailsForBriefing = (storedEmails && storedEmails.length > 0) ? storedEmails : analyzedEmails;
 
-    // 5. Curate EdTech & AI News
+    // 3. Retrieve recent incoming WhatsApp chats, prioritizing urgent messages
+    const recentChats = await query(
+      `SELECT sender_name, sender_phone, message_text, ai_summary, ai_urgency, timestamp 
+       FROM whatsapp_chats 
+       WHERE is_from_me = FALSE 
+       ORDER BY 
+         CASE WHEN ai_urgency = 'Urgent' THEN 1 WHEN ai_urgency = 'High' THEN 2 ELSE 3 END, 
+         id DESC 
+       LIMIT 20`
+    );
+
+    // 4. Curate EdTech & AI News
     const edTechNews = await getEdTechAndAiNews();
 
-    // 6. Generate PDF
+    // 5. Generate PDF
     const orgName = (await getSetting('ORGANIZATION_NAME')) || process.env.ORGANIZATION_NAME || 'JECRC University';
     const directorTitle = (await getSetting('DIRECTOR_TITLE')) || process.env.DIRECTOR_TITLE || 'Office of the Director';
 
@@ -1128,29 +1148,28 @@ export async function triggerDailyBriefing(targetJid = null) {
       organizationName: orgName,
       directorTitle,
       schedules,
-      emails: analyzedEmails,
-      sentDrafts,
-      whatsappSummary,
+      emails: emailsForBriefing,
+      chats: recentChats,
       edTechNews
     });
 
-    // 6. Send PDF document & Text Summary via Bot WhatsApp ONLY if verified Director phone exists
+    // 6. Send PDF document & Text Summary via Bot WhatsApp or Director WhatsApp fallback
     let dispatched = false;
-    if (botSock && recipientJid) {
-      // First send WhatsApp text briefing
-      const urgentCount = analyzedEmails.filter(e => e.priority === 'Urgent').length;
+    const activeSock = botSock || directorSock;
+    if (activeSock && recipientJid) {
+      const urgentCount = emailsForBriefing.filter(e => e.priority === 'Urgent').length;
       const textDigest = `🏛️ *OFFICIAL EXECUTIVE DAILY BRIEFING*\n📅 *Date:* ${todayStr}\n\n` +
         `📋 *Meetings Today:* ${schedules.length} scheduled\n` +
-        `🚨 *Urgent Emails:* ${urgentCount} require attention\n` +
-        `💬 *WhatsApp Alerts:* ${whatsappSummary.urgent_alerts?.length || 0} priority messages\n` +
+        `🚨 *Urgent Inbound Emails:* ${urgentCount} requiring attention\n` +
+        `💬 *WhatsApp Alerts:* ${recentChats.length} messages monitored\n` +
         `🎓 *Top EdTech News:* ${edTechNews[0]?.title || 'AI Integration in Higher Ed'}\n\n` +
-        `📎 *Attached:* Complete High-Resolution Executive PDF Report below.`;
+        `📎 *Attached:* High-Resolution Executive PDF Report below.`;
 
-      await botSock.sendMessage(recipientJid, { text: textDigest });
+      await activeSock.sendMessage(recipientJid, { text: textDigest });
 
       // Send PDF file
       const pdfBuffer = fs.readFileSync(pdfPath);
-      await botSock.sendMessage(recipientJid, {
+      await activeSock.sendMessage(recipientJid, {
         document: pdfBuffer,
         mimetype: 'application/pdf',
         fileName: `Executive_Briefing_${todayStr}.pdf`,
@@ -1158,9 +1177,9 @@ export async function triggerDailyBriefing(targetJid = null) {
       });
 
       dispatched = true;
-      await logActivity('BRIEFING', `Daily briefing PDF generated and sent to Director (${recipientJid})`, 'INFO');
+      await logActivity('BRIEFING', `Daily briefing PDF dispatched to Director (${recipientJid}) via ${botSock ? 'Bot' : 'Director'} WhatsApp`, 'INFO');
     } else {
-      console.log(`[Briefing] PDF generated at ${pdfPath}. WhatsApp dispatch skipped (no authorized Director phone configured or Bot WhatsApp disconnected).`);
+      console.log(`[Briefing] PDF generated at ${pdfPath}. WhatsApp dispatch skipped (recipientJid: ${recipientJid}, botSock: ${!!botSock}, directorSock: ${!!directorSock}).`);
     }
 
     return { success: true, pdfPath, dispatched };

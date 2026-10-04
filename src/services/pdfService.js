@@ -34,7 +34,7 @@ function drawPageTopHeader(doc, topTimestamp) {
   doc.save();
   doc.fontSize(8.5).font('Helvetica').fillColor('#6B7280');
   doc.text(topTimestamp, 48, 38);
-  doc.text('Morning brief', 48, 38, { width: 499, align: 'right' });
+  doc.text('Executive Morning Brief · Director Office', 48, 38, { width: 499, align: 'right' });
   doc.restore();
 }
 
@@ -69,40 +69,6 @@ function drawMinimalistIllustration(doc, y) {
   doc.restore();
 }
 
-function drawTimelineGrid(doc, y, timelineSlots = []) {
-  const colW = 145;
-  const col1X = 48;
-  const col2X = 210;
-  const col3X = 372;
-  const xs = [col1X, col2X, col3X];
-
-  // Thin vertical rules
-  doc.save();
-  doc.lineWidth(0.75).strokeColor('#E5E7EB');
-  doc.moveTo(198, y).lineTo(198, y + 70).stroke();
-  doc.moveTo(360, y).lineTo(360, y + 70).stroke();
-  doc.restore();
-
-  timelineSlots.slice(0, 3).forEach((slot, i) => {
-    const x = xs[i];
-    const w = (i === 2) ? 175 : colW;
-    doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#111827')
-       .text(slot.time, x, y);
-
-    doc.fontSize(8).font('Helvetica').fillColor('#4B5563')
-       .text(slot.text, x, y + 15, { width: w, lineGap: 2.2 });
-  });
-
-  // Thin horizontal rule below timeline
-  const ruleY = y + 84;
-  doc.save();
-  doc.lineWidth(0.75).strokeColor('#E5E7EB');
-  doc.moveTo(48, ruleY).lineTo(547, ruleY).stroke();
-  doc.restore();
-
-  return ruleY + 24;
-}
-
 function sanitizeText(str) {
   if (!str) return '';
   return String(str)
@@ -113,6 +79,87 @@ function sanitizeText(str) {
     .replace(/”/g, '"')
     .replace(/—/g, ' - ')
     .replace(/–/g, '-');
+}
+
+/**
+ * Dynamic, Data-Driven Schedule Section (No hardcoded 3-chunk blocks)
+ */
+function drawScheduleSection(doc, startY, schedules = []) {
+  let y = startY;
+
+  doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#111827')
+     .text("TODAY'S SCHEDULE & OFFICIAL ITINERARY", 48, y, { characterSpacing: 1.2 });
+  y += 18;
+
+  if (!schedules || schedules.length === 0) {
+    doc.save();
+    doc.roundedRect(48, y, 499, 44, 4).fillAndStroke('#F9FAFB', '#E5E7EB');
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#374151')
+       .text("Open Calendar for Strategic Governance", 62, y + 11);
+    doc.fontSize(8).font('Helvetica').fillColor('#6B7280')
+       .text("No official meetings or appointments scheduled on the Director's calendar for today.", 62, y + 25);
+    doc.restore();
+    return y + 60;
+  }
+
+  schedules.forEach((item) => {
+    const timeText = sanitizeText(item.time_slot || item.time || 'Scheduled');
+    const titleText = sanitizeText(item.title || 'Official Appointment');
+    const locText = sanitizeText(item.location ? `Venue: ${item.location}` : '');
+    const descText = sanitizeText(item.description || item.notes || '');
+    const priority = item.priority || 'Normal';
+
+    const detailsParts = [];
+    if (locText) detailsParts.push(locText);
+    if (descText) detailsParts.push(`Agenda: ${descText}`);
+    const detailsLine = detailsParts.join(' · ');
+
+    doc.fontSize(9.5).font('Helvetica-Bold');
+    const titleH = doc.heightOfString(titleText, { width: 375 });
+
+    doc.fontSize(8.5).font('Helvetica');
+    const detailsH = detailsLine ? doc.heightOfString(detailsLine, { width: 375, lineGap: 2 }) : 0;
+    const rowH = Math.max(26, titleH + detailsH + 8);
+
+    // Page overflow check
+    if (y + rowH > doc.page.height - 75) {
+      doc.addPage();
+      drawPageTopHeader(doc, getFormattedTopTimestamp());
+      y = 52;
+    }
+
+    // Time Badge
+    const isUrgent = priority === 'Urgent';
+    const isHigh = priority === 'High';
+    const badgeBg = isUrgent ? '#FEE2E2' : (isHigh ? '#FEF3C7' : '#EEF2FF');
+    const badgeColor = isUrgent ? '#991B1B' : (isHigh ? '#92400E' : '#4338CA');
+
+    doc.save();
+    doc.roundedRect(48, y + 2, 100, 18, 4).fill(badgeBg);
+    doc.fontSize(8).font('Helvetica-Bold').fillColor(badgeColor)
+       .text(timeText, 48, y + 6, { width: 100, align: 'center' });
+    doc.restore();
+
+    // Meeting Title
+    doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#111827')
+       .text(titleText, 160, y + 2, { width: 385 });
+
+    // Venue & Notes
+    if (detailsLine) {
+      doc.fontSize(8.5).font('Helvetica').fillColor('#4B5563')
+         .text(detailsLine, 160, y + titleH + 4, { width: 385, lineGap: 2 });
+    }
+
+    y += rowH + 8;
+  });
+
+  // Divider rule below schedule
+  doc.save();
+  doc.lineWidth(0.75).strokeColor('#E5E7EB');
+  doc.moveTo(48, y).lineTo(547, y).stroke();
+  doc.restore();
+
+  return y + 20;
 }
 
 function drawEditorialCategory(doc, categoryTitle, items = [], state) {
@@ -170,6 +217,7 @@ export async function generateExecutiveBriefingPdf({
   directorTitle = 'Office of the Director',
   schedules = [],
   emails = [],
+  chats = [],
   whatsappSummary = null,
   edTechNews = []
 }) {
@@ -188,13 +236,15 @@ export async function generateExecutiveBriefingPdf({
   }
 
   // Synthesize editorial content strictly from real data
-  const chatsList = whatsappSummary?.summary_points || [];
+  const chatsList = (Array.isArray(chats) && chats.length > 0) 
+    ? chats 
+    : (whatsappSummary?.summary_points || []);
+
   const briefData = await synthesizeEditorialBrief({
     dateStr,
     directorName: resolvedDirectorName,
     schedules,
     emails,
-    sentDrafts: arguments[0]?.sentDrafts || [],
     chats: chatsList,
     edTechNews
   });
@@ -232,31 +282,28 @@ export async function generateExecutiveBriefingPdf({
     // Hero Headline
     state.y = 88;
     const cleanHeadline = sanitizeText(briefData.headline);
-    doc.fontSize(24).font('Times-Bold').fillColor('#111827')
+    doc.fontSize(22).font('Times-Bold').fillColor('#111827')
        .text(cleanHeadline, 48, state.y, { width: 499, lineGap: 3 });
 
-    const headlineHeight = doc.heightOfString(cleanHeadline, { width: 499, font: 'Times-Bold', size: 24, lineGap: 3 });
+    const headlineHeight = doc.heightOfString(cleanHeadline, { width: 499, font: 'Times-Bold', size: 22, lineGap: 3 });
     const illustrationY = state.y + headlineHeight + 10;
 
     // Artistic Landscape Illustration
     drawMinimalistIllustration(doc, illustrationY);
 
-    // 3-Column Timeline
-    const timelineY = illustrationY + 68;
-    state.y = drawTimelineGrid(doc, timelineY, briefData.timeline);
+    // Dynamic, Data-Driven Schedule Section (No hardcoded 3-chunk blocks)
+    const scheduleY = illustrationY + 68;
+    state.y = drawScheduleSection(doc, scheduleY, schedules);
 
     // Categories (rendered ONLY if real items exist)
     if (briefData.needsAttention && briefData.needsAttention.length > 0) {
-      drawEditorialCategory(doc, 'NEEDS ATTENTION', briefData.needsAttention, state);
-    }
-    if (briefData.resolved && briefData.resolved.length > 0) {
-      drawEditorialCategory(doc, 'RESOLVED & DISPATCHED', briefData.resolved, state);
+      drawEditorialCategory(doc, 'CRITICAL INCOMING CORRESPONDENCE & EMAILS', briefData.needsAttention, state);
     }
     if (briefData.whatsappUpdates && briefData.whatsappUpdates.length > 0) {
       drawEditorialCategory(doc, 'CAMPUS & WHATSAPP CORRESPONDENCE', briefData.whatsappUpdates, state);
     }
     if (briefData.aiEdTech && briefData.aiEdTech.length > 0) {
-      drawEditorialCategory(doc, 'AI & HIGHER ED INTELLIGENCE', briefData.aiEdTech, state);
+      drawEditorialCategory(doc, 'AI & HIGHER ED STRATEGIC DEVELOPMENTS', briefData.aiEdTech, state);
     }
 
     // Final Footnote on last page

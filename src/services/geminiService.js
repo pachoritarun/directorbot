@@ -416,11 +416,10 @@ export async function synthesizeEditorialBrief({
   directorName = 'Dheemant',
   schedules = [],
   emails = [],
-  sentDrafts = [],
   chats = [],
   edTechNews = []
 }) {
-  const fallback = buildDefaultEditorialBrief({ dateStr, directorName, schedules, emails, sentDrafts, chats, edTechNews });
+  const fallback = buildDefaultEditorialBrief({ dateStr, directorName, schedules, emails, chats, edTechNews });
   const client = await getGeminiClient();
   if (!client) return fallback;
 
@@ -430,56 +429,36 @@ You are the Private Executive Editor and Chief of Staff to Director ${directorNa
 Synthesize a sharp, prestigious, and accurate daily morning intelligence brief for the Director.
 
 CRITICAL ACCURACY REQUIREMENT:
-You must STRICTLY base your briefing on the REAL data provided below.
+You must STRICTLY base your briefing on the REAL institutional data provided below.
 DO NOT invent or hallucinate fictional faculty, fake events, fake rupee amounts, fake student complaints, or fake city news.
-If there are no emails, no scheduled meetings, or no sent items, return an empty array [] for that section.
+DO NOT invent robotic filler text like "Open focus time for strategic university administration".
+DO NOT include any outgoing emails that the Director requested to send to someone.
 
 Real Inputs for ${dateStr}:
 - Scheduled Itinerary: ${JSON.stringify(schedules)}
-- Inbound Emails: ${JSON.stringify(emails.slice(0, 10))}
-- Recent Sent Dispatches: ${JSON.stringify(sentDrafts.slice(0, 5))}
-- Recent WhatsApp Messages: ${JSON.stringify(chats.slice(0, 10))}
+- Inbound Incoming Emails: ${JSON.stringify(emails.slice(0, 12))}
+- Monitored Campus WhatsApp Messages: ${JSON.stringify(chats.slice(0, 15))}
 - AI & Higher Ed Intelligence: ${JSON.stringify(edTechNews)}
 
 Return STRICTLY valid JSON with this exact schema:
 {
-  "headline": "One sharp, executive headline addressing Director ${directorName} regarding today's most urgent scheduled meeting or priority email.",
-  "timeline": [
-    {
-      "time": "9:30 AM – 1 PM",
-      "text": "Factual summary of morning meetings or 'No scheduled meetings. Open focus time for strategic correspondence.'"
-    },
-    {
-      "time": "1 – 4 PM",
-      "text": "Factual summary of afternoon appointments or 'No scheduled appointments. Open block for reviews.'"
-    },
-    {
-      "time": "4 PM onward",
-      "text": "Factual summary of evening sessions or 'No scheduled sessions. Open block for end-of-day wrap-up.'"
-    }
-  ],
+  "headline": "One sharp, executive headline addressing Director ${directorName} highlighting today's most critical scheduled meeting or priority incoming email.",
   "needsAttention": [
     {
-      "title": "Email / Issue Title",
-      "body": "Sender name, concise summary of the real email, and recommended action."
-    }
-  ],
-  "resolved": [
-    {
-      "title": "Action / Email Dispatched",
-      "body": "Summary of the real sent email or resolved action."
+      "title": "Email Subject / Critical Topic",
+      "body": "Sender name, concise 1-2 sentence summary of what they wrote, and recommended executive action."
     }
   ],
   "whatsappUpdates": [
     {
-      "title": "Contact / Department",
-      "body": "Summary of incoming WhatsApp communication."
+      "title": "Sender Name / Contact",
+      "body": "Concise summary of their incoming message and key issue."
     }
   ],
   "aiEdTech": [
     {
       "title": "Strategic Trend Title",
-      "body": "Actionable takeaway for higher education leadership and curriculum strategy."
+      "body": "Actionable takeaway for university leadership and curriculum strategy."
     }
   ]
 }
@@ -504,11 +483,9 @@ Return STRICTLY valid JSON with this exact schema:
 
     return {
       headline: parsed.headline || fallback.headline,
-      timeline: parsed.timeline?.length === 3 ? parsed.timeline : fallback.timeline,
-      needsAttention: Array.isArray(parsed.needsAttention) ? parsed.needsAttention : fallback.needsAttention,
-      resolved: Array.isArray(parsed.resolved) ? parsed.resolved : fallback.resolved,
-      whatsappUpdates: Array.isArray(parsed.whatsappUpdates) ? parsed.whatsappUpdates : fallback.whatsappUpdates,
-      aiEdTech: Array.isArray(parsed.aiEdTech) ? parsed.aiEdTech : fallback.aiEdTech
+      needsAttention: Array.isArray(parsed.needsAttention) && parsed.needsAttention.length > 0 ? parsed.needsAttention : fallback.needsAttention,
+      whatsappUpdates: Array.isArray(parsed.whatsappUpdates) && parsed.whatsappUpdates.length > 0 ? parsed.whatsappUpdates : fallback.whatsappUpdates,
+      aiEdTech: Array.isArray(parsed.aiEdTech) && parsed.aiEdTech.length > 0 ? parsed.aiEdTech : fallback.aiEdTech
     };
   } catch (err) {
     console.warn('[Gemini] Editorial brief synthesis failed, using real fallback brief:', err.message);
@@ -517,12 +494,12 @@ Return STRICTLY valid JSON with this exact schema:
 }
 
 /**
- * 100% Real, Data-Driven Fallback Brief (Zero hardcoded fake people or events)
+ * 100% Real, Data-Driven Fallback Brief (Zero hardcoded fake people, zero filler schedule blocks)
  */
-function buildDefaultEditorialBrief({ dateStr, directorName, schedules = [], emails = [], sentDrafts = [], chats = [], edTechNews = [] }) {
+function buildDefaultEditorialBrief({ dateStr, directorName, schedules = [], emails = [], chats = [], edTechNews = [] }) {
   // 1. Dynamic Headline based strictly on actual data
   const urgentEmails = (emails || []).filter(e => e.priority === 'Urgent');
-  let headline = `Your executive itinerary and briefing for today, ${directorName}.`;
+  let headline = `Your executive briefing and official daily schedule, ${directorName}.`;
   if (urgentEmails.length > 0 && urgentEmails[0].subject) {
     headline = `${urgentEmails[0].subject.replace(/^(Re:|Fwd:)\s*/i, '')} requires your executive attention today, ${directorName}.`;
   } else if (schedules.length > 0) {
@@ -531,88 +508,44 @@ function buildDefaultEditorialBrief({ dateStr, directorName, schedules = [], ema
     headline = `${emails.length} inbound communications await your review today, ${directorName}.`;
   }
 
-  // 2. 3-Column Timeline strictly from actual schedules
-  const morningMeetings = schedules.filter(s => {
-    const time = (s.time_slot || s.schedule_time || '').toLowerCase();
-    return time.includes('am') || time.includes('09:') || time.includes('10:') || time.includes('11:') || time.includes('12:');
-  });
-
-  const afternoonMeetings = schedules.filter(s => {
-    const time = (s.time_slot || s.schedule_time || '').toLowerCase();
-    return time.includes('pm') && (time.includes('1:') || time.includes('2:') || time.includes('3:'));
-  });
-
-  const eveningMeetings = schedules.filter(s => {
-    const time = (s.time_slot || s.schedule_time || '').toLowerCase();
-    return time.includes('pm') && (time.includes('4:') || time.includes('5:') || time.includes('6:') || time.includes('7:') || time.includes('8:'));
-  });
-
-  const timeline = [
-    {
-      time: "9:30 AM – 1 PM",
-      text: morningMeetings.length > 0
-        ? morningMeetings.map(m => `${m.title} at ${m.time_slot || m.schedule_time || 'morning'}${m.location ? ` (${m.location})` : ''}.`).join(' ')
-        : "No scheduled meetings. Open focus time for strategic university administration."
-    },
-    {
-      time: "1 – 4 PM",
-      text: afternoonMeetings.length > 0
-        ? afternoonMeetings.map(m => `${m.title} at ${m.time_slot || m.schedule_time}${m.location ? ` in ${m.location}` : ''}.`).join(' ')
-        : "No scheduled appointments. Dedicated block for departmental and administrative reviews."
-    },
-    {
-      time: "4 PM onward",
-      text: eveningMeetings.length > 0
-        ? eveningMeetings.map(m => `${m.title} at ${m.time_slot || m.schedule_time}${m.location ? ` (${m.location})` : ''}.`).join(' ')
-        : "No scheduled appointments. Open block for student activities and evening wrap-up."
-    }
-  ];
-
-  // 3. Needs Attention - populated ONLY from real analyzed emails
+  // 2. Needs Attention - populated ONLY from real analyzed inbound emails
   const attentionItems = [];
   if (emails && emails.length > 0) {
     emails.forEach(em => {
-      const isUrgent = em.priority === 'Urgent';
-      const hasAction = em.action_required && em.action_required.toLowerCase() !== 'no action needed' && em.action_required.toLowerCase() !== 'none';
-      if (isUrgent || hasAction || attentionItems.length < 3) {
-        attentionItems.push({
-          title: em.subject ? em.subject.replace(/^(Re:|Fwd:)\s*/i, '') : 'Inbound Correspondence',
-          body: `${em.senderName || em.senderEmail || 'Sender'} wrote regarding: "${em.summary || em.snippet || 'Review requested'}". Action suggested: ${em.action_required || 'Review email thread and take necessary action.'}`
-        });
-      }
-    });
-  }
-
-  // 4. Resolved - populated ONLY from real sent email drafts or executed actions
-  const resolvedItems = [];
-  if (sentDrafts && sentDrafts.length > 0) {
-    sentDrafts.slice(0, 3).forEach(d => {
-      resolvedItems.push({
-        title: `Email Dispatched: ${d.subject || 'Director Update'}`,
-        body: `Dispatched to ${d.recipient_email} via official Gmail following Director's verification.`
+      // Exclude emails sent by Director or self
+      if (em.sender_email && em.sender_email.toLowerCase().includes('amit.dheemant')) return;
+      const title = em.subject ? em.subject.replace(/^(Re:|Fwd:)\s*/i, '') : 'Inbound Correspondence';
+      const sender = em.sender_name || em.senderName || em.sender_email || em.senderEmail || 'Sender';
+      const summary = em.summary || em.snippet || 'Review requested';
+      const action = em.action_required || 'Review email thread and take necessary action.';
+      attentionItems.push({
+        title,
+        body: `${sender} wrote regarding: "${summary}". Suggested action: ${action}`
       });
     });
   }
 
-  // 5. WhatsApp Communications
+  // 3. WhatsApp Communications - strictly from real incoming chats
   const whatsappItems = [];
   if (chats && chats.length > 0) {
-    chats.slice(0, 3).forEach(c => {
+    chats.slice(0, 6).forEach(c => {
       if (typeof c === 'string') {
         whatsappItems.push({
           title: "Campus Communication Alert",
           body: c
         });
-      } else if (c.sender_name && c.message_text) {
+      } else if (c.sender_name || c.message_text) {
+        const sender = c.sender_name || c.sender_phone || 'Campus Contact';
+        const msg = (c.message_text || c.ai_summary || '').slice(0, 200);
         whatsappItems.push({
-          title: `Message from ${c.sender_name}`,
-          body: `"${c.message_text.slice(0, 180)}"`
+          title: `WhatsApp from ${sender}${c.sender_phone ? ` (${c.sender_phone})` : ''}`,
+          body: `"${msg}"`
         });
       }
     });
   }
 
-  // 6. AI & EdTech Strategic Intelligence
+  // 4. AI & EdTech Strategic Intelligence
   const aiEdTechItems = (edTechNews && edTechNews.length > 0) ? edTechNews.slice(0, 3).map(n => ({
     title: n.title,
     body: `${n.takeaway || ''}${n.source ? ` Source: ${n.source}.` : ''}`
@@ -620,9 +553,7 @@ function buildDefaultEditorialBrief({ dateStr, directorName, schedules = [], ema
 
   return {
     headline,
-    timeline,
     needsAttention: attentionItems,
-    resolved: resolvedItems,
     whatsappUpdates: whatsappItems,
     aiEdTech: aiEdTechItems
   };
