@@ -38,15 +38,61 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Helper to reliably detect subpath for reverse proxy (e.g. /directorbot)
+function detectSubpath(req) {
+  // 1. Explicit env var
+  if (process.env.APP_BASE_PATH) {
+    return process.env.APP_BASE_PATH.replace(/\/+$/, '');
+  }
+
+  // 2. X-Forwarded-Prefix header from reverse proxy
+  if (req.headers['x-forwarded-prefix']) {
+    return req.headers['x-forwarded-prefix'].replace(/\/+$/, '');
+  }
+
+  // 3. Request URL or original URL
+  if (req.originalUrl && req.originalUrl.startsWith('/directorbot')) {
+    return '/directorbot';
+  }
+  if (req.url && req.url.startsWith('/directorbot')) {
+    return '/directorbot';
+  }
+
+  // 4. X-Original-URI header
+  if (req.headers['x-original-uri'] && req.headers['x-original-uri'].startsWith('/directorbot')) {
+    return '/directorbot';
+  }
+
+  // 5. Host matching ai.jecrcuniversity.edu.in
+  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+  if (host.includes('ai.jecrcuniversity.edu.in')) {
+    return '/directorbot';
+  }
+
+  // 6. Referer header check
+  if (req.headers.referer && req.headers.referer.includes('/directorbot')) {
+    return '/directorbot';
+  }
+
+  // 7. Configured Google Redirect URI
+  const googleUri = process.env.GOOGLE_REDIRECT_URI || '';
+  if (googleUri.includes('/directorbot')) {
+    return '/directorbot';
+  }
+
+  return '';
+}
+
 // Subpath & Reverse Proxy Compatibility Middleware
 app.use((req, res, next) => {
-  req.subpath = '';
+  req.subpath = detectSubpath(req);
+
   if (req.url === '/directorbot') {
     return res.redirect('/directorbot/');
   }
   if (req.url.startsWith('/directorbot/')) {
-    req.subpath = '/directorbot';
     req.url = req.url.substring('/directorbot'.length);
+    if (!req.url.startsWith('/')) req.url = '/' + req.url;
   }
   next();
 });
@@ -87,25 +133,27 @@ function extractToken(req) {
 
 // Login Page Route: If already authenticated, redirect to root dashboard
 app.get('/login.html', async (req, res) => {
+  const subpath = req.subpath || detectSubpath(req);
   const token = extractToken(req);
   if (token) {
     const user = await validateSession(token);
     if (user) {
-      return res.redirect(`${req.subpath || ''}/`);
+      return res.redirect(`${subpath || ''}/`);
     }
   }
   res.sendFile(path.join(__dirname, 'src/public/login.html'));
 });
 
-// Protect Root Page: Unauthenticated users are redirected to /login.html
+// Protect Root Page: Unauthenticated users are redirected to /login.html with subpath
 app.get(['/', '/index.html'], async (req, res) => {
+  const subpath = req.subpath || detectSubpath(req);
   const token = extractToken(req);
   if (!token) {
-    return res.redirect(`${req.subpath || ''}/login.html`);
+    return res.redirect(`${subpath || ''}/login.html`);
   }
   const user = await validateSession(token);
   if (!user) {
-    return res.redirect(`${req.subpath || ''}/login.html`);
+    return res.redirect(`${subpath || ''}/login.html`);
   }
   res.sendFile(path.join(__dirname, 'src/public/index.html'));
 });
