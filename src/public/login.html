@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Director Login | Executive AI Chief of Staff</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body.login-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 15%, rgba(99, 102, 241, 0.12) 0%, rgba(9, 13, 22, 1) 75%);
+      padding: 24px;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Ambient background grid */
+    .bg-grid-overlay {
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 36px 36px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .login-container {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 440px;
+    }
+
+    .login-card {
+      background: rgba(17, 24, 39, 0.85);
+      border: 1px solid var(--border-color);
+      border-radius: 18px;
+      padding: 36px 32px;
+      box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.6), 0 0 30px var(--glow-indigo);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .login-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent-indigo), var(--accent-cyan), var(--accent-indigo));
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .login-logo {
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent-indigo), var(--accent-cyan));
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 24px var(--glow-indigo);
+    }
+
+    .login-title {
+      font-size: 1.45rem;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+      margin-bottom: 4px;
+    }
+
+    .login-subtitle {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .login-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(99, 102, 241, 0.12);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      margin-top: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .input-wrapper {
+      position: relative;
+      margin-top: 6px;
+    }
+
+    .input-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-sub);
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+    }
+
+    .login-input {
+      width: 100%;
+      padding: 12px 14px 12px 42px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 0.92rem;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .login-input:focus {
+      border-color: var(--accent-indigo);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+      background: #1e293b;
+    }
+
+    .password-toggle {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-sub);
+      cursor: pointer;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      transition: color 0.15s;
+    }
+
+    .password-toggle:hover {
+      color: var(--text-main);
+    }
+
+    .btn-login {
+      width: 100%;
+      padding: 13px;
+      margin-top: 24px;
+      background: linear-gradient(135deg, var(--accent-indigo), var(--accent-indigo-hover));
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      letter-spacing: 0.2px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 4px 16px var(--glow-indigo);
+      transition: all 0.2s ease;
+    }
+
+    .btn-login:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 22px rgba(99, 102, 241, 0.4);
+      background: linear-gradient(135deg, #7073ff, var(--accent-indigo));
+    }
+
+    .btn-login:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    .login-alert {
+      display: none;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+      align-items: center;
+      gap: 10px;
+      line-height: 1.4;
+    }
+
+    .login-alert.error {
+      display: flex;
+      background: rgba(244, 63, 94, 0.12);
+      border: 1px solid rgba(244, 63, 94, 0.35);
+      color: #fda4af;
+    }
+
+    .login-alert.success {
+      display: flex;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #6ee7b7;
+    }
+
+    .login-footer-info {
+      text-align: center;
+      margin-top: 22px;
+      font-size: 0.76rem;
+      color: var(--text-sub);
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: none;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading .spinner {
+      display: inline-block;
+    }
+    .loading .btn-text {
+      display: none;
+    }
+  </style>
+</head>
+<body class="dark-theme login-page">
+  <div class="bg-grid-overlay"></div>
+
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h1 class="login-title">Executive Command Portal</h1>
+        <div class="login-subtitle">JECRC University • Office of the Director</div>
+        <div class="login-badge">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Restricted Executive Access
+        </div>
+      </div>
+
+      <div id="login-alert" class="login-alert">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span id="login-alert-msg"></span>
+      </div>
+
+      <form id="login-form">
+        <div class="form-group" style="margin-bottom: 18px;">
+          <label for="email" style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Executive Email Address</label>
+          <div class="input-wrapper">
+            <div class="input-icon">
+              <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            </div>
+            <input 
+              type="email" 
+              id="email" 
+              class="login-input" 
+              placeholder="amit.dheemant@jecrcu.edu.in" 
+              value="amit.dheemant@jecrcu.edu.in" 
+              required 
+              autocomplete="username"
+              autofocus
+            >
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label for="password" style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted);">Security Passcode</label>
+            <span style="font-size: 0.72rem; color: var(--text-sub);">Case sensitive</span>
+          </div>
+          <div class="input-wrapper">
+            <div class="input-icon">
+              <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <input 
+              type="password" 
+              id="password" 
+              class="login-input" 
+              placeholder="Enter passcode" 
+              required 
+              autocomplete="current-password"
+            >
+            <button type="button" class="password-toggle" id="btn-toggle-pwd" title="Show/Hide password">
+              <svg id="eye-icon" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-login" id="btn-submit">
+          <div class="spinner"></div>
+          <span class="btn-text">Authenticate & Open Hub</span>
+          <svg class="btn-text" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </form>
+
+      <div class="login-footer-info">
+        <span>Protected by Hardware-Accelerated Scrypt Authentication</span><br>
+        <span style="opacity: 0.7;">Autonomous AI Chief of Staff &copy; JECRC University</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Subpath resolution helper
+    let basePath = window.location.pathname.replace(/\/+$/, '');
+    if (basePath.endsWith('.html') || basePath.includes('.htm')) {
+      basePath = basePath.substring(0, basePath.lastIndexOf('/'));
+    }
+    if (basePath === '/' || !basePath) basePath = '';
+
+    function resolveUrl(url) {
+      if (!url) return '';
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+      const clean = url.startsWith('/') ? url : `/${url}`;
+      return `${basePath}${clean}`;
+    }
+
+    // Toggle Password Visibility
+    const pwdInput = document.getElementById('password');
+    const toggleBtn = document.getElementById('btn-toggle-pwd');
+    toggleBtn.addEventListener('click', () => {
+      const isPwd = pwdInput.type === 'password';
+      pwdInput.type = isPwd ? 'text' : 'password';
+      toggleBtn.style.color = isPwd ? 'var(--accent-cyan)' : 'var(--text-sub)';
+    });
+
+    const form = document.getElementById('login-form');
+    const submitBtn = document.getElementById('btn-submit');
+    const alertBox = document.getElementById('login-alert');
+    const alertMsg = document.getElementById('login-alert-msg');
+
+    function showAlert(msg, isSuccess = false) {
+      alertBox.className = isSuccess ? 'login-alert success' : 'login-alert error';
+      alertMsg.textContent = msg;
+    }
+
+    function hideAlert() {
+      alertBox.className = 'login-alert';
+      alertMsg.textContent = '';
+    }
+
+    // Check if session already valid
+    (async function checkExistingAuth() {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        try {
+          const res = await fetch(resolveUrl('/api/auth/me'), {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (data && data.success) {
+            // Already logged in, redirect to dashboard
+            window.location.replace(resolveUrl('/'));
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    })();
+
+    // Handle Form Submit
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideAlert();
+
+      const email = document.getElementById('email').value.trim();
+      const password = pwdInput.value;
+
+      if (!email || !password) {
+        showAlert('Please provide both your official email and passcode.');
+        return;
+      }
+
+      submitBtn.classList.add('loading');
+      submitBtn.disabled = true;
+
+      try {
+        const response = await fetch(resolveUrl('/api/auth/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          // Store token in localStorage
+          if (data.token) {
+            localStorage.setItem('auth_token', data.token);
+          }
+          if (data.user) {
+            localStorage.setItem('auth_user', JSON.stringify(data.user));
+          }
+
+          showAlert('Authenticated successfully. Redirecting to Executive Hub...', true);
+          
+          setTimeout(() => {
+            window.location.replace(resolveUrl('/'));
+          }, 600);
+        } else {
+          showAlert(data.error || 'Authentication failed. Please verify credentials.');
+          submitBtn.classList.remove('loading');
+          submitBtn.disabled = false;
+        }
+      } catch (err) {
+        showAlert('Connection error communicating with server. Please try again.');
+        submitBtn.classList.remove('loading');
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

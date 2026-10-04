@@ -167,6 +167,34 @@ async function createTables() {
       \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX \`idx_created_at\` (\`created_at\`)
+    ) ENGINE=InnoDB;`,
+
+    // Administrator & Executive Login Users
+    `CREATE TABLE IF NOT EXISTS \`admin_users\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`email\` VARCHAR(255) NOT NULL UNIQUE,
+      \`name\` VARCHAR(150) DEFAULT 'Director',
+      \`password_hash\` VARCHAR(255) NOT NULL,
+      \`salt\` VARCHAR(64) NOT NULL,
+      \`role\` VARCHAR(50) DEFAULT 'director',
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX \`idx_user_email\` (\`email\`)
+    ) ENGINE=InnoDB;`,
+
+    // Auth Sessions & Active Tokens
+    `CREATE TABLE IF NOT EXISTS \`auth_sessions\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`token\` VARCHAR(128) NOT NULL UNIQUE,
+      \`user_id\` INT NOT NULL,
+      \`email\` VARCHAR(255) NOT NULL,
+      \`expires_at\` TIMESTAMP NOT NULL,
+      \`user_agent\` VARCHAR(255),
+      \`ip_address\` VARCHAR(64),
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX \`idx_session_token\` (\`token\`),
+      INDEX \`idx_session_expires\` (\`expires_at\`),
+      FOREIGN KEY (\`user_id\`) REFERENCES \`admin_users\`(\`id\`) ON DELETE CASCADE
     ) ENGINE=InnoDB;`
   ];
 
@@ -194,6 +222,14 @@ async function createTables() {
     } catch (err) {
       // Column already exists or table not ready, safely ignore
     }
+  }
+
+  // Seed default admin credentials
+  try {
+    const { seedDefaultAdmin } = await import('../services/authService.js');
+    await seedDefaultAdmin();
+  } catch (err) {
+    console.error('[Database Error] Failed to seed default admin:', err.message);
   }
 
   console.log(`[Database] All MySQL tables verified/created successfully.`);

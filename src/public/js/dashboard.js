@@ -15,13 +15,40 @@ function resolveUrl(url) {
   return `${basePath}${clean}`;
 }
 
-// Auto-prefix all relative API calls with the subpath
+// Auto-prefix all relative API calls with the subpath, attach auth token, and handle 401
 const originalFetch = window.fetch;
-window.fetch = function(url, options) {
+window.fetch = function(url, options = {}) {
   if (typeof url === 'string' && url.startsWith('/api/')) {
     url = resolveUrl(url);
   }
-  return originalFetch.call(this, url, options);
+
+  // Attach Authorization token
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    options.headers = options.headers || {};
+    if (options.headers instanceof Headers) {
+      if (!options.headers.has('Authorization')) {
+        options.headers.append('Authorization', `Bearer ${token}`);
+      }
+    } else if (Array.isArray(options.headers)) {
+      if (!options.headers.some(([k]) => k.toLowerCase() === 'authorization')) {
+        options.headers.push(['Authorization', `Bearer ${token}`]);
+      }
+    } else {
+      if (!options.headers['Authorization'] && !options.headers['authorization']) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+  }
+
+  return originalFetch.call(this, url, options).then(res => {
+    if (res.status === 401 && typeof url === 'string' && !url.includes('/api/auth/login')) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      window.location.replace(resolveUrl('/login.html'));
+    }
+    return res;
+  });
 };
 
 // Socket.io Connection with dynamic path
@@ -39,10 +66,12 @@ let currentStatus = {
 
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
+  initAuthSession();
   setupNavigation();
   setupSocketListeners();
   loadAllData();
   setupSettingsForm();
+  setupChangePasswordForm();
   setupScheduleForm();
   checkUrlParams();
 
@@ -56,6 +85,122 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadSchedules, 15000);
   setInterval(loadActivityLogs, 8000);
 });
+
+// User Session & Logout
+async function initAuthSession() {
+  const logoutBtn = document.getElementById('btn-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to sign out from the Executive Hub?')) return;
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (e) {}
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      window.location.replace(resolveUrl('/login.html'));
+    });
+  }
+
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    if (data && data.success && data.user) {
+      const u = data.user;
+      const emailElem = document.getElementById('user-display-email');
+      const settingsEmail = document.getElementById('settings-current-email');
+      const avatarElem = document.getElementById('user-avatar-initials');
+
+      if (emailElem) emailElem.textContent = u.email || 'amit.dheemant@jecrcu.edu.in';
+      if (settingsEmail) settingsEmail.textContent = u.email || 'amit.dheemant@jecrcu.edu.in';
+      if (avatarElem) {
+        const parts = (u.name || 'Amit Dheemant').split(' ').filter(Boolean);
+        const initials = parts.length > 1 ? (parts[0][0] + parts[parts.length - 1][0]) : parts[0].substring(0, 2);
+        avatarElem.textContent = initials.toUpperCase();
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load user profile:', err);
+  }
+}
+
+// Change Password Handler in Settings Tab
+function setupChangePasswordForm() {
+  const form = document.getElementById('form-change-password');
+  const msgElem = document.getElementById('pwd-change-msg');
+  const btn = document.getElementById('btn-change-pwd');
+  if (!form) return;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (msgElem) {
+      msgElem.textContent = '';
+      msgElem.style.color = '';
+    }
+
+    const currentPassword = document.getElementById('pwd-current').value;
+    const newPassword = document.getElementById('pwd-new').value;
+    const confirmPassword = document.getElementById('pwd-confirm').value;
+
+    if (newPassword !== confirmPassword) {
+      if (msgElem) {
+        msgElem.textContent = '❌ New passwords do not match';
+        msgElem.style.color = '#f87171';
+      }
+      showToast('❌ New passwords do not match');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      if (msgElem) {
+        msgElem.textContent = '❌ Passcode must be at least 6 characters';
+        msgElem.style.color = '#f87171';
+      }
+      showToast('❌ Passcode must be at least 6 characters');
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Updating...';
+    }
+
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (msgElem) {
+          msgElem.textContent = '✅ ' + (data.message || 'Passcode updated successfully!');
+          msgElem.style.color = '#34d399';
+        }
+        showToast('✅ Passcode updated successfully!');
+        form.reset();
+      } else {
+        const errText = data.error || 'Failed to update passcode';
+        if (msgElem) {
+          msgElem.textContent = '❌ ' + errText;
+          msgElem.style.color = '#f87171';
+        }
+        showToast('❌ ' + errText);
+      }
+    } catch (err) {
+      if (msgElem) {
+        msgElem.textContent = '❌ Network error communicating with server';
+        msgElem.style.color = '#f87171';
+      }
+      showToast('❌ Network error updating passcode');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Update Passcode';
+      }
+    }
+  });
+}
 
 // Tab Navigation
 function setupNavigation() {

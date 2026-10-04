@@ -11,6 +11,7 @@ import { initDatabase, query, getSetting, setSetting, logActivity, getDbStatus }
 import { getAuthUrl, handleOAuthCallback, getGmailStatus, fetchUnreadEmails, sendVerifiedEmail, disconnectGmail } from './src/services/gmailService.js';
 import { analyzeEmails, getGeminiClient, getGeminiModel } from './src/services/geminiService.js';
 import { addSchedule, getSchedulesByDate, deleteSchedule, getUpcomingSchedules } from './src/services/scheduleService.js';
+import { loginUser, validateSession, logoutSession, changeUserPassword } from './src/services/authService.js';
 import {
   startDirectorSession,
   startBotSession,
@@ -39,16 +40,78 @@ app.use(express.urlencoded({ extended: true }));
 
 // Subpath & Reverse Proxy Compatibility Middleware
 app.use((req, res, next) => {
+  req.subpath = '';
   if (req.url === '/directorbot') {
     return res.redirect('/directorbot/');
   }
   if (req.url.startsWith('/directorbot/')) {
+    req.subpath = '/directorbot';
     req.url = req.url.substring('/directorbot'.length);
   }
   next();
 });
 
-app.use(express.static(path.join(__dirname, 'src/public')));
+// Cookie Parser Helper
+function parseCookies(req) {
+  const list = {};
+  const cookieHeader = req.headers?.cookie;
+  if (!cookieHeader) return list;
+  cookieHeader.split(';').forEach(cookie => {
+    let [name, ...rest] = cookie.split('=');
+    name = name?.trim();
+    if (!name) return;
+    const value = rest.join('=').trim();
+    list[name] = decodeURIComponent(value);
+  });
+  return list;
+}
+
+// Token Extractor
+function extractToken(req) {
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7).trim();
+  }
+  if (req.headers['x-auth-token']) {
+    return req.headers['x-auth-token'];
+  }
+  const cookies = parseCookies(req);
+  if (cookies['auth_token']) {
+    return cookies['auth_token'];
+  }
+  if (req.query && req.query.token) {
+    return req.query.token;
+  }
+  return null;
+}
+
+// Login Page Route: If already authenticated, redirect to root dashboard
+app.get('/login.html', async (req, res) => {
+  const token = extractToken(req);
+  if (token) {
+    const user = await validateSession(token);
+    if (user) {
+      return res.redirect(`${req.subpath || ''}/`);
+    }
+  }
+  res.sendFile(path.join(__dirname, 'src/public/login.html'));
+});
+
+// Protect Root Page: Unauthenticated users are redirected to /login.html
+app.get(['/', '/index.html'], async (req, res) => {
+  const token = extractToken(req);
+  if (!token) {
+    return res.redirect(`${req.subpath || ''}/login.html`);
+  }
+  const user = await validateSession(token);
+  if (!user) {
+    return res.redirect(`${req.subpath || ''}/login.html`);
+  }
+  res.sendFile(path.join(__dirname, 'src/public/index.html'));
+});
+
+// Static files (explicitly excluding auto-serving index.html so / is guarded)
+app.use(express.static(path.join(__dirname, 'src/public'), { index: false }));
 app.use('/storage', express.static(path.join(__dirname, 'storage')));
 
 // Helper to get dashboard root URL for redirects
@@ -86,6 +149,86 @@ app.get('/auth/google/callback', async (req, res) => {
     res.redirect(`${dash}/?auth=success&email=${encodeURIComponent(result.email)}`);
   } catch (err) {
     res.redirect(`${dash}/?auth=error&msg=${encodeURIComponent(err.message)}`);
+  }
+});
+
+// --- Auth API Endpoints ---
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '';
+    const userAgent = req.headers['user-agent'] || '';
+
+    const result = await loginUser(email, password, userAgent, ip);
+    if (!result.success) {
+      return res.status(401).json(result);
+    }
+
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    res.cookie('auth_token', result.token, {
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: '/',
+      sameSite: 'lax',
+      secure: isHttps
+    });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const token = extractToken(req);
+    if (token) {
+      await logoutSession(token);
+    }
+    res.clearCookie('auth_token', { path: '/' });
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Guard Middleware for all remaining /api/* endpoints
+app.use('/api', async (req, res, next) => {
+  if (req.path === '/auth/login') return next();
+
+  const token = extractToken(req);
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Authentication required.' });
+  }
+
+  const user = await validateSession(token);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Session expired or invalid. Please log in again.' });
+  }
+
+  req.user = user;
+  req.authToken = token;
+  next();
+});
+
+// Authenticated user profile
+app.get('/api/auth/me', (req, res) => {
+  res.json({ success: true, user: req.user });
+});
+
+// Change Password endpoint
+app.post('/api/auth/change-password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    const result = await changeUserPassword(req.user.id, currentPassword, newPassword);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
