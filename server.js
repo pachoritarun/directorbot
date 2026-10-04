@@ -226,17 +226,27 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.post('/api/auth/logout', async (req, res) => {
+app.all(['/api/auth/logout', '/directorbot/api/auth/logout'], async (req, res) => {
   try {
     const token = extractToken(req);
     if (token) {
       await logoutSession(token);
     }
-    res.clearCookie('auth_token', { path: '/' });
-    res.json({ success: true, message: 'Logged out successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {}
+
+  res.clearCookie('auth_token', { path: '/' });
+  res.clearCookie('auth_token', { path: '/directorbot' });
+  res.setHeader('Set-Cookie', [
+    'auth_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0',
+    'auth_token=; Path=/directorbot; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0'
+  ]);
+
+  if (req.method === 'GET') {
+    const subpath = req.subpath || detectSubpath(req);
+    return res.redirect(`${subpath || ''}/login.html`);
   }
+
+  res.json({ success: true, message: 'Logged out successfully' });
 });
 
 // Guard Middleware for all remaining /api/* endpoints

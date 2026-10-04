@@ -86,19 +86,35 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadActivityLogs, 8000);
 });
 
+// Global Instant Logout Handler
+window.executeLogout = async function(e) {
+  if (e) {
+    try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+  }
+  // 1. Instantly wipe client-side tokens
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('auth_user');
+  sessionStorage.clear();
+
+  // 2. Clear cookies across all subpath scopes
+  document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+  document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/directorbot;";
+  document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/directorbot/;";
+
+  // 3. Notify backend
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (err) {}
+
+  // 4. Redirect directly to login page
+  window.location.href = resolveUrl('/login.html');
+};
+
 // User Session & Logout
 async function initAuthSession() {
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', async () => {
-      if (!confirm('Are you sure you want to sign out from the Executive Hub?')) return;
-      try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-      } catch (e) {}
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-      window.location.replace(resolveUrl('/login.html'));
-    });
+    logoutBtn.onclick = window.executeLogout;
   }
 
   try {
@@ -110,7 +126,11 @@ async function initAuthSession() {
       const settingsEmail = document.getElementById('settings-current-email');
       const avatarElem = document.getElementById('user-avatar-initials');
 
-      if (emailElem) emailElem.textContent = u.email || 'amit.dheemant@jecrcu.edu.in';
+      // Do NOT display raw full email in header
+      if (emailElem) {
+        emailElem.textContent = u.name || 'Director Office';
+        emailElem.title = u.email || 'amit.dheemant@jecrcu.edu.in';
+      }
       if (settingsEmail) settingsEmail.textContent = u.email || 'amit.dheemant@jecrcu.edu.in';
       if (avatarElem) {
         const parts = (u.name || 'Amit Dheemant').split(' ').filter(Boolean);

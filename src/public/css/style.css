@@ -1000,9 +1000,16 @@ body.dark-theme {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.btn-logout:hover {
+.btn-logout * {
+  pointer-events: none;
+}
+
+.btn-logout:hover, .btn-logout:active {
   background: rgba(244, 63, 94, 0.25);
   color: #fff;
   border-color: rgba(244, 63, 94, 0.4);
