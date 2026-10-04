@@ -87,27 +87,24 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Global Instant Logout Handler
-window.executeLogout = async function(e) {
+window.executeLogout = function(e) {
   if (e) {
     try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
   }
   // 1. Instantly wipe client-side tokens
-  localStorage.removeItem('auth_token');
-  localStorage.removeItem('auth_user');
-  sessionStorage.clear();
+  try {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    sessionStorage.clear();
+  } catch (err) {}
 
   // 2. Clear cookies across all subpath scopes
   document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
   document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/directorbot;";
   document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/directorbot/;";
 
-  // 3. Notify backend
-  try {
-    await fetch('/api/auth/logout', { method: 'POST' });
-  } catch (err) {}
-
-  // 4. Redirect directly to login page
-  window.location.href = resolveUrl('/login.html');
+  // 3. Navigate directly to /logout which purges session in MySQL and redirects to login.html
+  window.location.href = resolveUrl('/logout');
 };
 
 // User Session & Logout

@@ -369,24 +369,30 @@
       alertMsg.textContent = '';
     }
 
-    // Check if session already valid
-    (async function checkExistingAuth() {
-      const token = localStorage.getItem('auth_token');
-      if (token) {
-        try {
-          const res = await fetch(resolveUrl('/api/auth/me'), {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          const data = await res.json();
-          if (data && data.success) {
-            // Already logged in, redirect to dashboard
-            window.location.replace(resolveUrl('/'));
-          }
-        } catch (e) {
-          // ignore
+    // If arrived via logout, ensure tokens are purged and avoid bouncing back
+    if (window.location.search.includes('logout=true')) {
+      try {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+        sessionStorage.clear();
+      } catch (e) {}
+    } else {
+      // Check if session already valid
+      (async function checkExistingAuth() {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+          try {
+            const res = await fetch(resolveUrl('/api/auth/me'), {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data && data.success) {
+              window.location.replace(resolveUrl('/'));
+            }
+          } catch (e) {}
         }
-      }
-    })();
+      })();
+    }
 
     // Handle Form Submit
     form.addEventListener('submit', async (e) => {

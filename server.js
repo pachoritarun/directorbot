@@ -131,9 +131,12 @@ function extractToken(req) {
   return null;
 }
 
-// Login Page Route: If already authenticated, redirect to root dashboard
+// Login Page Route: If already authenticated, redirect to root dashboard (unless logging out)
 app.get('/login.html', async (req, res) => {
   const subpath = req.subpath || detectSubpath(req);
+  if (req.query.logout === 'true') {
+    return res.sendFile(path.join(__dirname, 'src/public/login.html'));
+  }
   const token = extractToken(req);
   if (token) {
     const user = await validateSession(token);
@@ -226,7 +229,8 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.all(['/api/auth/logout', '/directorbot/api/auth/logout'], async (req, res) => {
+app.all(['/logout', '/directorbot/logout', '/api/auth/logout', '/directorbot/api/auth/logout'], async (req, res) => {
+  const subpath = req.subpath || detectSubpath(req);
   try {
     const token = extractToken(req);
     if (token) {
@@ -236,17 +240,18 @@ app.all(['/api/auth/logout', '/directorbot/api/auth/logout'], async (req, res) =
 
   res.clearCookie('auth_token', { path: '/' });
   res.clearCookie('auth_token', { path: '/directorbot' });
+  res.clearCookie('auth_token', { path: '/directorbot/' });
   res.setHeader('Set-Cookie', [
     'auth_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0',
-    'auth_token=; Path=/directorbot; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0'
+    'auth_token=; Path=/directorbot; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0',
+    'auth_token=; Path=/directorbot/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0'
   ]);
 
-  if (req.method === 'GET') {
-    const subpath = req.subpath || detectSubpath(req);
-    return res.redirect(`${subpath || ''}/login.html`);
+  if (req.headers.accept?.includes('application/json') && req.method === 'POST') {
+    return res.json({ success: true, message: 'Logged out successfully' });
   }
 
-  res.json({ success: true, message: 'Logged out successfully' });
+  return res.redirect(`${subpath || ''}/login.html?logout=true`);
 });
 
 // Guard Middleware for all remaining /api/* endpoints

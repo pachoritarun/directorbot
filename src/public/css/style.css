@@ -999,6 +999,7 @@ body.dark-theme {
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
   transition: all 0.2s ease;
   touch-action: manipulation;
   user-select: none;
