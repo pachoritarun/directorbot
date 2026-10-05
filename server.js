@@ -217,8 +217,27 @@ app.get('/auth/google', async (req, res) => {
 });
 
 app.get('/auth/google/callback', async (req, res) => {
+  const subpath = req.subpath || detectSubpath(req);
   const dash = await getDashboardRedirectUrl();
-  const { code, error } = req.query;
+  const { code, error, state } = req.query;
+
+  // Handle Recruitment Mailbox OAuth callback (uses state=recruitment)
+  if (state === 'recruitment') {
+    if (error) {
+      return res.redirect(`${subpath || ''}/recruitment/?auth=failed&msg=${encodeURIComponent(error)}`);
+    }
+    if (!code) {
+      return res.redirect(`${subpath || ''}/recruitment/?auth=failed&msg=Missing_authorization_code`);
+    }
+    try {
+      const result = await handleRecruitmentOAuthCallback(code);
+      return res.redirect(`${subpath || ''}/recruitment/?auth=success&email=${encodeURIComponent(result.email)}`);
+    } catch (err) {
+      return res.redirect(`${subpath || ''}/recruitment/?auth=error&msg=${encodeURIComponent(err.message)}`);
+    }
+  }
+
+  // Handle Director Google OAuth callback
   if (error) {
     return res.redirect(`${dash}/?auth=failed&msg=${encodeURIComponent(error)}`);
   }
@@ -235,19 +254,17 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 // --- Recruitment Google OAuth2 Routes ---
-app.get('/auth/recruitment/google', async (req, res) => {
+app.get(['/auth/recruitment/google', '/directorbot/auth/recruitment/google'], async (req, res) => {
+  const subpath = req.subpath || detectSubpath(req);
   try {
-    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-    const url = await getRecruitmentAuthUrl(host, proto);
+    const url = await getRecruitmentAuthUrl();
     res.redirect(url);
   } catch (err) {
-    const subpath = req.subpath || detectSubpath(req);
     res.status(500).send(`<h3>Recruitment Google OAuth Error</h3><p>${err.message}</p><p><a href="${subpath || ''}/recruitment/">Back to Recruitment Hub</a></p>`);
   }
 });
 
-app.get('/auth/recruitment/google/callback', async (req, res) => {
+app.get(['/auth/recruitment/google/callback', '/directorbot/auth/recruitment/google/callback'], async (req, res) => {
   const subpath = req.subpath || detectSubpath(req);
   const { code, error } = req.query;
   if (error) {
@@ -258,17 +275,7 @@ app.get('/auth/recruitment/google/callback', async (req, res) => {
   }
 
   try {
-    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-    let customRedirect = null;
-    if (host) {
-      customRedirect = `${proto}://${host}/auth/recruitment/google/callback`;
-      if (host.includes('ai.jecrcuniversity.edu.in')) {
-        customRedirect = 'https://ai.jecrcuniversity.edu.in/directorbot/auth/recruitment/google/callback';
-      }
-    }
-
-    const result = await handleRecruitmentOAuthCallback(code, customRedirect);
+    const result = await handleRecruitmentOAuthCallback(code);
     res.redirect(`${subpath || ''}/recruitment/?auth=success&email=${encodeURIComponent(result.email)}`);
   } catch (err) {
     res.redirect(`${subpath || ''}/recruitment/?auth=error&msg=${encodeURIComponent(err.message)}`);

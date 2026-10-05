@@ -18,17 +18,12 @@ let pollingIntervalHandle = null;
 
 /**
  * Get OAuth2 client configured specifically for Recruitment Gmail
+ * Uses the approved redirect URI configured in Google Cloud Console
  */
-export async function getRecruitmentOAuth2Client(customRedirectUri = null) {
-  const clientId = (await getRecruitmentSetting('GOOGLE_CLIENT_ID')) || process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = (await getRecruitmentSetting('GOOGLE_CLIENT_SECRET')) || process.env.GOOGLE_CLIENT_SECRET;
-  
-  // Custom or auto-resolved redirect URI
-  let redirectUri = customRedirectUri || (await getRecruitmentSetting('RECRUITMENT_GOOGLE_REDIRECT_URI')) || process.env.RECRUITMENT_GOOGLE_REDIRECT_URI;
-  if (!redirectUri) {
-    const baseRedirect = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/google/callback';
-    redirectUri = baseRedirect.replace(/\/auth\/google\/callback.*$/, '/auth/recruitment/google/callback');
-  }
+export async function getRecruitmentOAuth2Client() {
+  const clientId = (await getSetting('GOOGLE_CLIENT_ID')) || process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = (await getSetting('GOOGLE_CLIENT_SECRET')) || process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = (await getSetting('GOOGLE_REDIRECT_URI')) || process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/google/callback';
 
   if (!clientId || !clientSecret) {
     return null;
@@ -39,18 +34,10 @@ export async function getRecruitmentOAuth2Client(customRedirectUri = null) {
 
 /**
  * Generate Google OAuth Consent URL for Recruitment Inbox
+ * Uses state='recruitment' to route callbacks correctly without requiring new Google Cloud credentials
  */
-export async function getRecruitmentAuthUrl(hostHeader = '', protoHeader = 'https') {
-  let customRedirect = null;
-  if (hostHeader) {
-    const protocol = protoHeader || 'https';
-    customRedirect = `${protocol}://${hostHeader}/auth/recruitment/google/callback`;
-    if (hostHeader.includes('ai.jecrcuniversity.edu.in')) {
-      customRedirect = `https://ai.jecrcuniversity.edu.in/directorbot/auth/recruitment/google/callback`;
-    }
-  }
-
-  const oauth2Client = await getRecruitmentOAuth2Client(customRedirect);
+export async function getRecruitmentAuthUrl() {
+  const oauth2Client = await getRecruitmentOAuth2Client();
   if (!oauth2Client) {
     throw new Error('Google OAuth credentials (Client ID and Secret) are not configured.');
   }
@@ -58,15 +45,16 @@ export async function getRecruitmentAuthUrl(hostHeader = '', protoHeader = 'http
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: RECRUITMENT_SCOPES
+    scope: RECRUITMENT_SCOPES,
+    state: 'recruitment'
   });
 }
 
 /**
  * Handle Recruitment OAuth callback and store separate recruitment tokens
  */
-export async function handleRecruitmentOAuthCallback(code, customRedirectUri = null) {
-  const oauth2Client = await getRecruitmentOAuth2Client(customRedirectUri);
+export async function handleRecruitmentOAuthCallback(code) {
+  const oauth2Client = await getRecruitmentOAuth2Client();
   if (!oauth2Client) throw new Error('Recruitment OAuth2 client not initialized');
 
   const { tokens } = await oauth2Client.getToken(code);
