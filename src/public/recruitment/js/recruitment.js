@@ -212,69 +212,89 @@ async function loadApplications() {
     }
 
     tbody.innerHTML = data.applications.map(app => {
-      // Date formatting
-      const dateStr = app.created_at ? new Date(app.created_at).toLocaleString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit'
-      }) : 'Just now';
+      try {
+        const rawDate = app.created_at || app.received_at;
+        const dateStr = rawDate ? new Date(rawDate).toLocaleString('en-IN', {
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit'
+        }) : 'Recent';
 
-      // Status badge
-      let statusBadge = '';
-      if (app.confirmation_status === 'SENT') {
-        const methodTag = app.confirmation_method === 'SMTP' ? 'via SMTP' : 'via Gmail';
-        statusBadge = `<span class="badge-status sent" title="Sent at ${app.confirmation_sent_at || ''}">✓ Dispatched (${methodTag})</span>`;
-      } else if (app.confirmation_status === 'FAILED') {
-        statusBadge = `<span class="badge-status failed" title="${escapeHtml(app.confirmation_error || 'Dispatch error')}">✕ Failed</span>`;
-      } else {
-        statusBadge = `<span class="badge-status pending">⏳ Pending</span>`;
+        // Status badge
+        let statusBadge = '';
+        if (app.confirmation_status === 'SENT') {
+          const methodTag = app.confirmation_method === 'SMTP' ? 'via SMTP' : 'via Gmail';
+          statusBadge = `<span class="badge-status sent" title="Sent at ${app.confirmation_sent_at || ''}">✓ Dispatched (${methodTag})</span>`;
+        } else if (app.confirmation_status === 'FAILED') {
+          statusBadge = `<span class="badge-status failed" title="${escapeHtml(app.confirmation_error || 'Dispatch error')}">✕ Failed</span>`;
+        } else if (app.confirmation_status === 'SKIPPED') {
+          statusBadge = `<span class="badge-status pending" title="${escapeHtml(app.confirmation_error || 'Skipped')}">⏭ Skipped (Duplicate)</span>`;
+        } else {
+          statusBadge = `<span class="badge-status pending">⏳ Pending</span>`;
+        }
+
+        // Attachments display with safe type checks
+        let filenames = [];
+        if (typeof app.resume_filenames === 'string' && app.resume_filenames) {
+          filenames = app.resume_filenames.split(',').map(f => f.trim()).filter(Boolean);
+        } else if (Array.isArray(app.resume_filenames)) {
+          filenames = app.resume_filenames;
+        }
+
+        const attachmentsHtml = filenames.length > 0 ? filenames.map(f => `
+          <div class="attachment-badge">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+            </svg>
+            ${escapeHtml(f)}
+          </div>
+        `).join('') : '<span style="color: var(--text-muted); font-size: 0.78rem;">Email Text</span>';
+
+        // Skills tags with safe type checks
+        let skillsList = [];
+        if (typeof app.skills === 'string' && app.skills) {
+          skillsList = app.skills.split(',').map(s => s.trim()).filter(Boolean);
+        } else if (Array.isArray(app.skills)) {
+          skillsList = app.skills;
+        }
+
+        const skillsHtml = skillsList.length > 0 ? `
+          <div style="margin-top: 5px; display: flex; gap: 4px; flex-wrap: wrap;">
+            ${skillsList.slice(0, 4).map(s => `
+              <span style="font-size: 0.7rem; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; color: var(--text-sub);">
+                ${escapeHtml(s)}
+              </span>
+            `).join('')}
+          </div>` : '';
+
+        return `
+          <tr>
+            <td><span class="app-id-badge">${escapeHtml(app.application_id || 'JECRC-REC')}</span></td>
+            <td class="candidate-cell">
+              <div class="name">${escapeHtml(app.candidate_name || 'Candidate')}</div>
+              <div class="email">${escapeHtml(app.candidate_email || '')}</div>
+              ${app.candidate_phone ? `<div class="phone">📞 ${escapeHtml(app.candidate_phone)}</div>` : ''}
+            </td>
+            <td><span class="post-pill">${escapeHtml(app.applied_post || 'Applicant')}</span></td>
+            <td>${attachmentsHtml}</td>
+            <td style="max-width: 260px;">
+              <div style="font-size: 0.8rem; color: var(--text-sub); line-height: 1.35;">${escapeHtml(app.ai_summary || app.email_snippet || 'No summary available')}</div>
+              ${skillsHtml}
+            </td>
+            <td>${statusBadge}</td>
+            <td style="font-size: 0.78rem; color: var(--text-muted); white-space: nowrap;">${dateStr}</td>
+            <td>
+              <button class="btn-resend" onclick="sendConfirmation('${app.id}')" title="Send or resend confirmation email">
+                ${app.confirmation_status === 'SENT' ? 'Resend' : 'Send'}
+              </button>
+            </td>
+          </tr>
+        `;
+      } catch (rowErr) {
+        console.warn('Error formatting application row:', rowErr);
+        return '';
       }
-
-      // Attachments display
-      const filenames = app.resume_filenames ? app.resume_filenames.split(',').map(f => f.trim()).filter(Boolean) : [];
-      const attachmentsHtml = filenames.length > 0 ? filenames.map(f => `
-        <div class="attachment-badge">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-          </svg>
-          ${escapeHtml(f)}
-        </div>
-      `).join('') : '<span style="color: var(--text-muted); font-size: 0.78rem;">Email Text</span>';
-
-      // Skills tags
-      const skillsHtml = app.skills ? `
-        <div style="margin-top: 5px; display: flex; gap: 4px; flex-wrap: wrap;">
-          ${app.skills.split(',').slice(0, 4).map(s => `
-            <span style="font-size: 0.7rem; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; color: var(--text-sub);">
-              ${escapeHtml(s.trim())}
-            </span>
-          `).join('')}
-        </div>` : '';
-
-      return `
-        <tr>
-          <td><span class="app-id-badge">${escapeHtml(app.application_id || 'JECRC-REC')}</span></td>
-          <td class="candidate-cell">
-            <div class="name">${escapeHtml(app.candidate_name || 'Candidate')}</div>
-            <div class="email">${escapeHtml(app.candidate_email || '')}</div>
-            ${app.candidate_phone ? `<div class="phone">📞 ${escapeHtml(app.candidate_phone)}</div>` : ''}
-          </td>
-          <td><span class="post-pill">${escapeHtml(app.applied_post || 'Applicant')}</span></td>
-          <td>${attachmentsHtml}</td>
-          <td style="max-width: 260px;">
-            <div style="font-size: 0.8rem; color: var(--text-sub); line-height: 1.35;">${escapeHtml(app.ai_summary || app.email_snippet || 'No summary available')}</div>
-            ${skillsHtml}
-          </td>
-          <td>${statusBadge}</td>
-          <td style="font-size: 0.78rem; color: var(--text-muted); white-space: nowrap;">${dateStr}</td>
-          <td>
-            <button class="btn-resend" onclick="sendConfirmation('${app.id}')" title="Send or resend confirmation email">
-              ${app.confirmation_status === 'SENT' ? 'Resend' : 'Send'}
-            </button>
-          </td>
-        </tr>
-      `;
     }).join('');
   } catch (err) {
     console.error('Failed to load applications:', err);

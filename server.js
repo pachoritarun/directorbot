@@ -440,6 +440,16 @@ app.get('/api/recruitment/applications', async (req, res) => {
       params.push(status);
     }
 
+    // Clean out any bogus non-job bank/statement rows
+    try {
+      await query(`DELETE FROM candidate_applications WHERE 
+        candidate_email LIKE '%pnb%' OR 
+        candidate_email LIKE '%estatement%' OR 
+        candidate_name LIKE '%estatement%' OR 
+        email_subject LIKE '%statement%' OR 
+        email_subject LIKE '%bank%'`);
+    } catch (e) {}
+
     sql += ' ORDER BY created_at DESC LIMIT 300';
     const rows = await query(sql, params);
 

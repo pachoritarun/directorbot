@@ -85,7 +85,7 @@ export async function handleRecruitmentOAuthCallback(code) {
   await setRecruitmentSetting('RECRUITMENT_EMAIL', hiringEmail);
   await logActivity('RECRUITMENT', `Hiring Gmail connected successfully: ${hiringEmail}`, 'INFO');
 
-  // Kick off an initial scan
+  // Trigger initial scan
   setTimeout(() => {
     scanRecruitmentInbox().catch(e => console.warn('[Recruitment Scan Initial]', e.message));
   }, 3000);
@@ -199,10 +199,8 @@ export async function testSmtpConnection({ host, port, secure, user, pass, fromE
   });
 
   try {
-    // 1. Verify connection
     await transporter.verify();
 
-    // 2. If test recipient provided, send ping
     if (testRecipient && testRecipient.includes('@')) {
       const sender = `"${fromName || 'JECRC Recruitment Office'}" <${fromEmail || user}>`;
       await transporter.sendMail({
@@ -336,14 +334,20 @@ async function parseCandidateDetailsWithGemini(emailData) {
   const { senderEmail, senderName, subject, snippet, bodyText, attachmentNames } = emailData;
 
   const fallbackResult = {
-    is_job_application: true,
+    is_job_application: false,
     candidate_name: senderName || senderEmail.split('@')[0],
     applied_post: extractPostHeuristic(subject, bodyText) || 'Faculty / Staff Applicant',
     candidate_phone: '',
     experience_years: '',
     skills: '',
-    ai_summary: `Candidate ${senderName || senderEmail} submitted application with attachments: ${attachmentNames.join(', ')}`
+    ai_summary: `Email from ${senderName || senderEmail}`
   };
+
+  // Immediate negative check for bank statements, invoices, alerts
+  const isBankOrFinance = /(bank|statement|e-statement|account\s+statement|invoice|receipt|pnb|hdfc|sbi|icici|axis|kotak|rbi|otp\b|credit\s+card|transaction)/i.test(`${senderEmail} ${subject} ${attachmentNames.join(' ')}`);
+  if (isBankOrFinance) {
+    return { ...fallbackResult, is_job_application: false };
+  }
 
   const client = await getGeminiClient();
   if (!client) {
@@ -353,6 +357,10 @@ async function parseCandidateDetailsWithGemini(emailData) {
   const prompt = `You are an AI Recruitment Officer for JECRC University.
 Analyze the following incoming email and its attachments to extract candidate application data.
 
+CRITICAL INSTRUCTIONS:
+- If this email is a bank statement, financial alert, e-statement, bill, invoice, OTP, newsletter, receipt, or any personal non-hiring email, you MUST respond with "is_job_application": false.
+- ONLY mark "is_job_application": true if the sender is legitimately applying for a job, faculty position, teaching role, research fellowship, staff vacancy, or submitting their personal resume/CV for employment.
+
 Email Sender: ${senderName} <${senderEmail}>
 Email Subject: ${subject}
 Attachment Filenames: ${attachmentNames.join(', ') || 'None'}
@@ -361,7 +369,7 @@ Email Body (Excerpt):
 ${(bodyText || snippet || '').substring(0, 1500)}
 
 Determine:
-1. Is this a job application, CV/resume submission, faculty post application, or hiring inquiry?
+1. Is this a legitimate job application / CV submission for university employment? (true or false)
 2. Candidate's full name.
 3. The specific post / position / department applied for (e.g., "Assistant Professor - CSE", "Professor - Mechanical", "Lab Assistant", "Research Fellow", etc.). If not explicitly stated, infer from subject/body or default to "Faculty / Staff Applicant".
 4. Contact phone number if present.
@@ -371,7 +379,7 @@ Determine:
 
 Respond ONLY with valid JSON in this exact structure:
 {
-  "is_job_application": true,
+  "is_job_application": false,
   "candidate_name": "Full Name",
   "applied_post": "Position Title",
   "candidate_phone": "Phone or empty",
@@ -385,7 +393,7 @@ Respond ONLY with valid JSON in this exact structure:
       contents: prompt,
       generationConfig: {
         responseMimeType: 'application/json',
-        temperature: 0.2
+        temperature: 0.1
       }
     });
 
@@ -394,7 +402,7 @@ Respond ONLY with valid JSON in this exact structure:
     const parsed = JSON.parse(cleanJson);
 
     return {
-      is_job_application: parsed.is_job_application !== false,
+      is_job_application: parsed.is_job_application === true,
       candidate_name: parsed.candidate_name || fallbackResult.candidate_name,
       applied_post: parsed.applied_post || fallbackResult.applied_post,
       candidate_phone: parsed.candidate_phone || '',
@@ -425,7 +433,7 @@ function extractPostHeuristic(subject = '', body = '') {
 }
 
 /**
- * Scan recruitment Gmail inbox for new unread emails with resumes/CVs
+ * Scan recruitment Gmail inbox for new incoming resumes/CVs
  */
 export async function scanRecruitmentInbox() {
   if (isScanningActive) {
@@ -439,9 +447,21 @@ export async function scanRecruitmentInbox() {
 
   isScanningActive = true;
   const { gmail } = authClient;
+  const myConnectedEmail = (authClient.email || '').toLowerCase().trim();
   let processedCount = 0;
 
   try {
+    // Clean up any historical self-reply or bank statement entries
+    await query(
+      `DELETE FROM candidate_applications WHERE 
+        candidate_email = ? OR 
+        candidate_email LIKE '%pnb%' OR 
+        candidate_email LIKE '%estatement%' OR 
+        email_subject LIKE '%statement%' OR 
+        email_subject LIKE '%bank%'`,
+      [myConnectedEmail]
+    );
+
     // Search recent unread messages or messages from past 2 days
     const listRes = await gmail.users.messages.list({
       userId: 'me',
@@ -459,13 +479,13 @@ export async function scanRecruitmentInbox() {
     const autoReply = settings.auto_reply_enabled === 'true';
 
     for (const msg of messages) {
-      // Check if already processed
+      // 1. Check if already processed
       const existing = await query('SELECT id FROM candidate_applications WHERE gmail_message_id = ? LIMIT 1', [msg.id]);
       if (existing && existing.length > 0) {
         continue;
       }
 
-      // Fetch full message
+      // 2. Fetch full message
       const msgRes = await gmail.users.messages.get({
         userId: 'me',
         id: msg.id,
@@ -473,6 +493,13 @@ export async function scanRecruitmentInbox() {
       });
 
       const messageData = msgRes.data;
+      const labelIds = messageData.labelIds || [];
+
+      // STRICT CHECK: Skip our own sent messages and drafts
+      if (labelIds.includes('SENT') || labelIds.includes('DRAFT')) {
+        continue;
+      }
+
       const headers = messageData.payload?.headers || [];
       const fromHeader = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
       const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(No Subject)';
@@ -488,6 +515,21 @@ export async function scanRecruitmentInbox() {
       } else {
         senderEmail = fromHeader.trim().toLowerCase();
         senderName = senderEmail.split('@')[0];
+      }
+
+      // STRICT CHECK: NEVER process emails sent from our own address (prevent self-reply loops)
+      if (senderEmail === myConnectedEmail || fromHeader.toLowerCase().includes(myConnectedEmail)) {
+        continue;
+      }
+
+      // STRICT CHECK: Exclude automated senders, bank statements, bills, receipts, OTPs
+      const isAutomatedOrFinance = 
+        /^(no-?reply|donotreply|statements?|estatements?|alert|notification|mailer-daemon|postmaster|billing|invoice|bank|promo|updates?|news(letter)?)@/i.test(senderEmail) ||
+        /(pnb|hdfc|icici|sbi|axis|kotak|bank|statement|invoice|receipt|order|payment|transaction|bill)/i.test(senderEmail) ||
+        /(statement|invoice|receipt|bill|account\s+statement|e-statement|credit\s+card|transaction\s+alert|otp\b|pnb|passbook)/i.test(subject);
+
+      if (isAutomatedOrFinance) {
+        continue;
       }
 
       // Inspect attachments & body
@@ -520,9 +562,10 @@ export async function scanRecruitmentInbox() {
 
       const attachmentNames = attachments.map(a => a.filename);
       const hasResumeExtension = attachmentNames.some(fn => /\.(pdf|doc|docx|rtf)$/i.test(fn));
-      const textMentionsJob = /(resume|cv|curriculum vitae|applying for|application for|job application|faculty|position|candidate)/i.test(`${subject} ${bodyText}`);
+      const filenameLooksLikeResume = attachmentNames.some(fn => /(resume|cv|biodata|bio-data|curriculum|application|profile)/i.test(fn));
+      const textMentionsJob = /(resume|cv|curriculum\s+vitae|applying\s+for|application\s+for|job\s+application|faculty\s+position|assistant\s+professor|associate\s+professor|professor|lecturer|job\s+opening|vacancy|hiring|candidate)/i.test(`${subject} ${bodyText}`);
 
-      // Filter: must either have resume attachment or mention job application
+      // Must have resume attachment or mention job application in text
       if (!hasResumeExtension && !textMentionsJob) {
         continue;
       }
@@ -537,12 +580,20 @@ export async function scanRecruitmentInbox() {
         attachmentNames
       });
 
-      if (!candidateInfo.is_job_application && !hasResumeExtension) {
+      // STRICT: Must be confirmed as a job application by Gemini
+      if (!candidateInfo.is_job_application) {
         continue;
       }
 
       // Generate unique application ID
       const appId = `JECRC-HR-${Date.now().toString().slice(-5)}${Math.floor(10 + Math.random() * 90)}`;
+
+      // Check if candidate was already confirmed recently (within 7 days) to prevent spamming
+      const alreadyConfirmed = await query(
+        "SELECT id FROM candidate_applications WHERE candidate_email = ? AND confirmation_status = 'SENT' AND created_at > NOW() - INTERVAL 7 DAY LIMIT 1",
+        [senderEmail]
+      );
+      const shouldDispatch = autoReply && (!alreadyConfirmed || alreadyConfirmed.length === 0);
 
       // Insert record
       await query(
@@ -572,8 +623,8 @@ export async function scanRecruitmentInbox() {
 
       processedCount++;
 
-      // Dispatch instant confirmation if enabled
-      if (autoReply) {
+      // Dispatch confirmation
+      if (shouldDispatch) {
         try {
           const dispatchResult = await sendConfirmationEmail({
             candidateEmail: senderEmail,
@@ -601,9 +652,20 @@ export async function scanRecruitmentInbox() {
             [dispatchErr.message.substring(0, 500), appId]
           );
         }
+      } else if (!autoReply) {
+        // Auto-reply disabled in settings
+      } else {
+        // Confirmation skipped because already sent in last 7 days
+        await query(
+          `UPDATE candidate_applications SET
+            confirmation_status = 'SKIPPED',
+            confirmation_error = 'Duplicate application within 7 days. Confirmation already sent.'
+           WHERE application_id = ?`,
+          [appId]
+        );
       }
 
-      // Keep the incoming email UNREAD on Gmail so recruiters see it unread in their mailbox
+      // Ensure the email remains UNREAD in Gmail
       try {
         await gmail.users.messages.modify({
           userId: 'me',
@@ -612,9 +674,7 @@ export async function scanRecruitmentInbox() {
             addLabelIds: ['UNREAD']
           }
         });
-      } catch (labelErr) {
-        // If already unread or error, safely ignore
-      }
+      } catch (labelErr) {}
     }
 
     return {
