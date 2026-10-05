@@ -195,6 +195,54 @@ async function createTables() {
       INDEX \`idx_session_token\` (\`token\`),
       INDEX \`idx_session_expires\` (\`expires_at\`),
       FOREIGN KEY (\`user_id\`) REFERENCES \`admin_users\`(\`id\`) ON DELETE CASCADE
+    ) ENGINE=InnoDB;`,
+
+    // Recruitment System Configuration
+    `CREATE TABLE IF NOT EXISTS \`recruitment_settings\` (
+      \`key_name\` VARCHAR(100) PRIMARY KEY,
+      \`value\` TEXT,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB;`,
+
+    // Separate Google OAuth Tokens for Recruitment / Hiring Mailbox
+    `CREATE TABLE IF NOT EXISTS \`recruitment_tokens\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`email\` VARCHAR(255) NOT NULL UNIQUE,
+      \`refresh_token\` TEXT,
+      \`access_token\` TEXT,
+      \`expiry_date\` BIGINT,
+      \`scope\` TEXT,
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB;`,
+
+    // Candidate Job & Resume Applications
+    `CREATE TABLE IF NOT EXISTS \`candidate_applications\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`application_id\` VARCHAR(50) UNIQUE,
+      \`gmail_message_id\` VARCHAR(150) UNIQUE,
+      \`candidate_email\` VARCHAR(255) NOT NULL,
+      \`candidate_name\` VARCHAR(150),
+      \`candidate_phone\` VARCHAR(50),
+      \`applied_post\` VARCHAR(255),
+      \`experience_years\` VARCHAR(50),
+      \`skills\` TEXT,
+      \`ai_summary\` TEXT,
+      \`has_resume_attachment\` BOOLEAN DEFAULT TRUE,
+      \`resume_filenames\` TEXT,
+      \`confirmation_status\` ENUM('PENDING', 'SENT', 'FAILED', 'SKIPPED') DEFAULT 'PENDING',
+      \`confirmation_method\` VARCHAR(50) DEFAULT 'GMAIL_OAUTH',
+      \`confirmation_sent_at\` TIMESTAMP NULL,
+      \`confirmation_error\` TEXT,
+      \`email_subject\` VARCHAR(500),
+      \`email_snippet\` TEXT,
+      \`email_date\` VARCHAR(100),
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX \`idx_app_email\` (\`candidate_email\`),
+      INDEX \`idx_app_status\` (\`confirmation_status\`),
+      INDEX \`idx_app_post\` (\`applied_post\`),
+      INDEX \`idx_app_created\` (\`created_at\`)
     ) ENGINE=InnoDB;`
   ];
 
@@ -293,3 +341,73 @@ export function getDbStatus() {
     database: dbConfig.database
   };
 }
+
+export async function getRecruitmentSetting(key, defaultValue = null) {
+  try {
+    const rows = await query('SELECT value FROM recruitment_settings WHERE key_name = ?', [key]);
+    if (rows && rows.length > 0) {
+      return rows[0].value;
+    }
+    return defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+export async function setRecruitmentSetting(key, value) {
+  try {
+    const stringValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    await query(
+      `INSERT INTO recruitment_settings (key_name, value) VALUES (?, ?) 
+       ON DUPLICATE KEY UPDATE value = ?`,
+      [key, stringValue, stringValue]
+    );
+    return true;
+  } catch (err) {
+    console.error(`[Database Error] setRecruitmentSetting failed for ${key}:`, err.message);
+    return false;
+  }
+}
+
+export async function getAllRecruitmentSettings() {
+  const defaults = {
+    dispatch_method: 'gmail', // 'gmail' or 'smtp'
+    smtp_host: '',
+    smtp_port: '587',
+    smtp_secure: 'false',
+    smtp_user: '',
+    smtp_pass: '',
+    smtp_from_name: 'JECRC University Recruitment Office',
+    smtp_from_email: '',
+    auto_reply_enabled: 'true',
+    email_subject_template: 'Application Received: {applied_post} at JECRC University (Ref: {application_id})',
+    email_body_template: `Dear {candidate_name},
+
+Thank you for your interest in joining JECRC University. We have successfully received your CV/Resume application for the position of {applied_post}.
+
+Your Application Reference Number is: {application_id}
+
+Our Selection & Scrutiny Committee is currently reviewing candidate submissions. Should your profile and academic qualifications align with our institutional requirements, our recruitment desk will contact you regarding subsequent evaluation or interview rounds.
+
+Please retain your Application Reference ID for all future communication.
+
+Warm regards,
+Human Resources & Recruitment Cell
+JECRC University, Jaipur
+Website: https://jecrcuniversity.edu.in`
+  };
+
+  try {
+    const rows = await query('SELECT key_name, value FROM recruitment_settings');
+    const settings = { ...defaults };
+    if (rows && rows.length > 0) {
+      for (const row of rows) {
+        settings[row.key_name] = row.value;
+      }
+    }
+    return settings;
+  } catch (err) {
+    return defaults;
+  }
+}
+

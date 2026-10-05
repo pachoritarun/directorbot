@@ -34,32 +34,43 @@ export function verifyPassword(password, storedHash, salt) {
   }
 }
 
+const DEFAULT_RECRUITER_EMAIL = 'deepak.talkudar@jecrcu.edu.in';
+const DEFAULT_RECRUITER_PASSWORD = 'Deepak@2026';
+const DEFAULT_RECRUITER_NAME = 'Deepak Talkudar';
+
 /**
- * Seed default admin credentials if admin_users is empty or user is missing
+ * Seed default admin credentials if admin_users is empty or users are missing
  */
 export async function seedDefaultAdmin() {
   try {
-    const users = await query('SELECT id, email FROM admin_users LIMIT 5');
-    if (users && users.length > 0) {
-      // Check if default user exists
-      const found = users.find(u => u.email.toLowerCase() === DEFAULT_ADMIN_EMAIL.toLowerCase());
-      if (found) {
-        return;
-      }
+    const users = await query('SELECT id, email, role FROM admin_users LIMIT 20');
+    const existingEmails = new Set(users.map(u => u.email.toLowerCase()));
+
+    // 1. Seed Director if missing
+    if (!existingEmails.has(DEFAULT_ADMIN_EMAIL.toLowerCase())) {
+      const { hash, salt } = hashPassword(DEFAULT_ADMIN_PASSWORD);
+      await query(
+        `INSERT INTO admin_users (email, name, password_hash, salt, role) 
+         VALUES (?, ?, ?, ?, 'director')
+         ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+        [DEFAULT_ADMIN_EMAIL.toLowerCase(), DEFAULT_ADMIN_NAME, hash, salt]
+      );
+      console.log(`[Auth] Default director account initialized for: ${DEFAULT_ADMIN_EMAIL}`);
     }
 
-    // Seed default admin
-    const { hash, salt } = hashPassword(DEFAULT_ADMIN_PASSWORD);
-    await query(
-      `INSERT INTO admin_users (email, name, password_hash, salt, role) 
-       VALUES (?, ?, ?, ?, 'director')
-       ON DUPLICATE KEY UPDATE updated_at = NOW()`,
-      [DEFAULT_ADMIN_EMAIL.toLowerCase(), DEFAULT_ADMIN_NAME, hash, salt]
-    );
-
-    console.log(`[Auth] Default admin account initialized for: ${DEFAULT_ADMIN_EMAIL}`);
+    // 2. Seed Deepak Talkudar (Recruiter Admin) if missing
+    if (!existingEmails.has(DEFAULT_RECRUITER_EMAIL.toLowerCase())) {
+      const { hash, salt } = hashPassword(DEFAULT_RECRUITER_PASSWORD);
+      await query(
+        `INSERT INTO admin_users (email, name, password_hash, salt, role) 
+         VALUES (?, ?, ?, ?, 'recruiter_admin')
+         ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+        [DEFAULT_RECRUITER_EMAIL.toLowerCase(), DEFAULT_RECRUITER_NAME, hash, salt]
+      );
+      console.log(`[Auth] Default recruiter admin account initialized for: ${DEFAULT_RECRUITER_EMAIL}`);
+    }
   } catch (err) {
-    console.error(`[Auth Error] Failed to seed default admin:`, err.message);
+    console.error(`[Auth Error] Failed to seed default accounts:`, err.message);
   }
 }
 
@@ -195,3 +206,138 @@ export async function changeUserPassword(userId, currentPassword, newPassword) {
     message: 'Password updated successfully. You can now use your new password.'
   };
 }
+
+/**
+ * Update email address and/or display name for an authenticated user
+ */
+export async function updateUserProfile(userId, newEmail, newName) {
+  if (!userId) {
+    return { success: false, error: 'Unauthorized request' };
+  }
+  if (!newEmail || !newEmail.includes('@')) {
+    return { success: false, error: 'A valid email address is required' };
+  }
+
+  const cleanEmail = newEmail.trim().toLowerCase();
+  const cleanName = (newName || '').trim();
+
+  // Check if another user already uses this email
+  const existing = await query('SELECT id FROM admin_users WHERE LOWER(email) = ? AND id != ? LIMIT 1', [cleanEmail, userId]);
+  if (existing && existing.length > 0) {
+    return { success: false, error: 'This email address is already assigned to another account' };
+  }
+
+  await query(
+    'UPDATE admin_users SET email = ?, name = COALESCE(NULLIF(?, ""), name), updated_at = NOW() WHERE id = ?',
+    [cleanEmail, cleanName, userId]
+  );
+
+  // Sync active sessions email
+  await query('UPDATE auth_sessions SET email = ? WHERE user_id = ?', [cleanEmail, userId]);
+
+  const [updated] = await query('SELECT id, email, name, role FROM admin_users WHERE id = ? LIMIT 1', [userId]);
+
+  await logActivity('SECURITY', `Profile updated for user ID ${userId}: ${cleanEmail}`, 'INFO');
+
+  return {
+    success: true,
+    message: 'Profile updated successfully',
+    user: updated
+  };
+}
+
+/**
+ * Add a new team member/recruiter
+ */
+export async function addTeamMember(requester, { email, name, password, role = 'recruiter' }) {
+  if (!requester || (requester.role !== 'recruiter_admin' && requester.role !== 'director')) {
+    return { success: false, error: 'Unauthorized: Only recruiter administrator can add team members' };
+  }
+
+  if (!email || !email.includes('@')) {
+    return { success: false, error: 'A valid email address is required' };
+  }
+  if (!password || password.length < 6) {
+    return { success: false, error: 'Password must be at least 6 characters long' };
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = (name || 'Recruiter').trim();
+  const assignedRole = requester.role === 'director' ? (role || 'recruiter') : 'recruiter';
+
+  // Check duplicate
+  const existing = await query('SELECT id FROM admin_users WHERE LOWER(email) = ? LIMIT 1', [cleanEmail]);
+  if (existing && existing.length > 0) {
+    return { success: false, error: 'An account with this email address already exists' };
+  }
+
+  const { hash, salt } = hashPassword(password);
+  const result = await query(
+    `INSERT INTO admin_users (email, name, password_hash, salt, role)
+     VALUES (?, ?, ?, ?, ?)`,
+    [cleanEmail, cleanName, hash, salt, assignedRole]
+  );
+
+  await logActivity('AUTH', `New team member added: ${cleanEmail} (${assignedRole}) by ${requester.email}`, 'INFO');
+
+  return {
+    success: true,
+    message: `Team member ${cleanName} added successfully.`,
+    user: {
+      id: result.insertId,
+      email: cleanEmail,
+      name: cleanName,
+      role: assignedRole
+    }
+  };
+}
+
+/**
+ * List team members for the Recruitment Portal
+ */
+export async function getTeamMembers() {
+  try {
+    const rows = await query(
+      `SELECT id, email, name, role, created_at, updated_at
+       FROM admin_users
+       WHERE role IN ('recruiter_admin', 'recruiter')
+       ORDER BY created_at ASC`
+    );
+    return rows;
+  } catch (err) {
+    console.error('[Auth Error] getTeamMembers error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Delete a recruiter team member
+ */
+export async function deleteTeamMember(memberId, requester) {
+  if (!requester || (requester.role !== 'recruiter_admin' && requester.role !== 'director')) {
+    return { success: false, error: 'Unauthorized: Only administrators can manage team members' };
+  }
+
+  if (parseInt(memberId) === parseInt(requester.id)) {
+    return { success: false, error: 'Cannot delete your own active account' };
+  }
+
+  const targetUsers = await query('SELECT id, email, role FROM admin_users WHERE id = ? LIMIT 1', [memberId]);
+  if (!targetUsers || targetUsers.length === 0) {
+    return { success: false, error: 'Team member not found' };
+  }
+
+  const target = targetUsers[0];
+  if (target.role === 'director') {
+    return { success: false, error: 'Cannot delete director account' };
+  }
+
+  await query('DELETE FROM admin_users WHERE id = ?', [memberId]);
+  await logActivity('AUTH', `Team member removed: ${target.email} by ${requester.email}`, 'INFO');
+
+  return {
+    success: true,
+    message: `Team member ${target.email} has been removed successfully.`
+  };
+}
+

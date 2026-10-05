@@ -119,6 +119,10 @@ async function initAuthSession() {
     const data = await res.json();
     if (data && data.success && data.user) {
       const u = data.user;
+      if (u.role === 'recruiter_admin' || u.role === 'recruiter') {
+        window.location.replace(resolveUrl('/recruitment/'));
+        return;
+      }
       const emailElem = document.getElementById('user-display-email');
       const settingsEmail = document.getElementById('settings-current-email');
       const avatarElem = document.getElementById('user-avatar-initials');

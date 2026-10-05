@@ -377,63 +377,71 @@
         sessionStorage.clear();
       } catch (e) {}
     } else {
-      // Check if session already valid
-      (async function checkExistingAuth() {
-        const token = localStorage.getItem('auth_token');
-        if (token) {
-          try {
-            const res = await fetch(resolveUrl('/api/auth/me'), {
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await res.json();
-            if (data && data.success) {
-              window.location.replace(resolveUrl('/'));
-            }
-          } catch (e) {}
-        }
-      })();
-    }
-
-    // Handle Form Submit
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      hideAlert();
-
-      const email = document.getElementById('email').value.trim();
-      const password = pwdInput.value;
-
-      if (!email || !password) {
-        showAlert('Please provide both your official email and passcode.');
-        return;
+        // Check if session already valid
+        (async function checkExistingAuth() {
+          const token = localStorage.getItem('auth_token');
+          if (token) {
+            try {
+              const res = await fetch(resolveUrl('/api/auth/me'), {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              const data = await res.json();
+              if (data && data.success && data.user) {
+                if (data.user.role === 'recruiter_admin' || data.user.role === 'recruiter') {
+                  window.location.replace(resolveUrl('/recruitment/'));
+                } else {
+                  window.location.replace(resolveUrl('/'));
+                }
+              }
+            } catch (e) {}
+          }
+        })();
       }
 
-      submitBtn.classList.add('loading');
-      submitBtn.disabled = true;
+      // Handle Form Submit
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideAlert();
 
-      try {
-        const response = await fetch(resolveUrl('/api/auth/login'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        });
+        const email = document.getElementById('email').value.trim();
+        const password = pwdInput.value;
 
-        const data = await response.json();
+        if (!email || !password) {
+          showAlert('Please provide both your official email and passcode.');
+          return;
+        }
 
-        if (response.ok && data.success) {
-          // Store token in localStorage
-          if (data.token) {
-            localStorage.setItem('auth_token', data.token);
-          }
-          if (data.user) {
-            localStorage.setItem('auth_user', JSON.stringify(data.user));
-          }
+        submitBtn.classList.add('loading');
+        submitBtn.disabled = true;
 
-          showAlert('Authenticated successfully. Redirecting to Executive Hub...', true);
-          
-          setTimeout(() => {
-            window.location.replace(resolveUrl('/'));
-          }, 600);
-        } else {
+        try {
+          const response = await fetch(resolveUrl('/api/auth/login'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          });
+
+          const data = await response.json();
+
+          if (response.ok && data.success) {
+            // Store token in localStorage
+            if (data.token) {
+              localStorage.setItem('auth_token', data.token);
+            }
+            if (data.user) {
+              localStorage.setItem('auth_user', JSON.stringify(data.user));
+            }
+
+            const isRecruiter = data.user && (data.user.role === 'recruiter_admin' || data.user.role === 'recruiter');
+            const targetUrl = isRecruiter ? resolveUrl('/recruitment/') : resolveUrl('/');
+            const targetTitle = isRecruiter ? 'Recruitment Hub...' : 'Executive Hub...';
+
+            showAlert(`Authenticated successfully. Redirecting to ${targetTitle}`, true);
+            
+            setTimeout(() => {
+              window.location.replace(targetUrl);
+            }, 600);
+          } else {
           showAlert(data.error || 'Authentication failed. Please verify credentials.');
           submitBtn.classList.remove('loading');
           submitBtn.disabled = false;

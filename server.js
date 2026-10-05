@@ -7,11 +7,21 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
-import { initDatabase, query, getSetting, setSetting, logActivity, getDbStatus } from './src/database/db.js';
+import { initDatabase, query, getSetting, setSetting, logActivity, getDbStatus, getRecruitmentSetting, setRecruitmentSetting, getAllRecruitmentSettings } from './src/database/db.js';
 import { getAuthUrl, handleOAuthCallback, getGmailStatus, fetchUnreadEmails, sendVerifiedEmail, disconnectGmail } from './src/services/gmailService.js';
 import { analyzeEmails, getGeminiClient, getGeminiModel } from './src/services/geminiService.js';
 import { addSchedule, getSchedulesByDate, deleteSchedule, getUpcomingSchedules } from './src/services/scheduleService.js';
-import { loginUser, validateSession, logoutSession, changeUserPassword } from './src/services/authService.js';
+import { loginUser, validateSession, logoutSession, changeUserPassword, updateUserProfile, addTeamMember, getTeamMembers, deleteTeamMember } from './src/services/authService.js';
+import {
+  getRecruitmentAuthUrl,
+  handleRecruitmentOAuthCallback,
+  getRecruitmentStatus,
+  scanRecruitmentInbox,
+  sendConfirmationEmail,
+  disconnectRecruitmentGmail,
+  testSmtpConnection,
+  startRecruitmentPollingEngine
+} from './src/services/recruitmentService.js';
 import {
   startDirectorSession,
   startBotSession,
@@ -131,7 +141,7 @@ function extractToken(req) {
   return null;
 }
 
-// Login Page Route: If already authenticated, redirect to root dashboard (unless logging out)
+// Login Page Route: If already authenticated, redirect to appropriate portal
 app.get('/login.html', async (req, res) => {
   const subpath = req.subpath || detectSubpath(req);
   if (req.query.logout === 'true') {
@@ -141,13 +151,16 @@ app.get('/login.html', async (req, res) => {
   if (token) {
     const user = await validateSession(token);
     if (user) {
+      if (user.role === 'recruiter_admin' || user.role === 'recruiter') {
+        return res.redirect(`${subpath || ''}/recruitment/`);
+      }
       return res.redirect(`${subpath || ''}/`);
     }
   }
   res.sendFile(path.join(__dirname, 'src/public/login.html'));
 });
 
-// Protect Root Page: Unauthenticated users are redirected to /login.html with subpath
+// Protect Root Page: Director Command Hub (Recruiters strictly blocked & redirected)
 app.get(['/', '/index.html'], async (req, res) => {
   const subpath = req.subpath || detectSubpath(req);
   const token = extractToken(req);
@@ -158,7 +171,25 @@ app.get(['/', '/index.html'], async (req, res) => {
   if (!user) {
     return res.redirect(`${subpath || ''}/login.html`);
   }
+  if (user.role === 'recruiter_admin' || user.role === 'recruiter') {
+    // Recruiter cannot access Director Bot dashboard, redirect to Recruitment Hub
+    return res.redirect(`${subpath || ''}/recruitment/`);
+  }
   res.sendFile(path.join(__dirname, 'src/public/index.html'));
+});
+
+// Protect Recruitment Portal Page
+app.get(['/recruitment', '/recruitment/', '/recruitment/index.html'], async (req, res) => {
+  const subpath = req.subpath || detectSubpath(req);
+  const token = extractToken(req);
+  if (!token) {
+    return res.redirect(`${subpath || ''}/login.html`);
+  }
+  const user = await validateSession(token);
+  if (!user) {
+    return res.redirect(`${subpath || ''}/login.html`);
+  }
+  res.sendFile(path.join(__dirname, 'src/public/recruitment/index.html'));
 });
 
 // Static files (explicitly excluding auto-serving index.html so / is guarded)
@@ -200,6 +231,47 @@ app.get('/auth/google/callback', async (req, res) => {
     res.redirect(`${dash}/?auth=success&email=${encodeURIComponent(result.email)}`);
   } catch (err) {
     res.redirect(`${dash}/?auth=error&msg=${encodeURIComponent(err.message)}`);
+  }
+});
+
+// --- Recruitment Google OAuth2 Routes ---
+app.get('/auth/recruitment/google', async (req, res) => {
+  try {
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    const url = await getRecruitmentAuthUrl(host, proto);
+    res.redirect(url);
+  } catch (err) {
+    const subpath = req.subpath || detectSubpath(req);
+    res.status(500).send(`<h3>Recruitment Google OAuth Error</h3><p>${err.message}</p><p><a href="${subpath || ''}/recruitment/">Back to Recruitment Hub</a></p>`);
+  }
+});
+
+app.get('/auth/recruitment/google/callback', async (req, res) => {
+  const subpath = req.subpath || detectSubpath(req);
+  const { code, error } = req.query;
+  if (error) {
+    return res.redirect(`${subpath || ''}/recruitment/?auth=failed&msg=${encodeURIComponent(error)}`);
+  }
+  if (!code) {
+    return res.redirect(`${subpath || ''}/recruitment/?auth=failed&msg=Missing_authorization_code`);
+  }
+
+  try {
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    let customRedirect = null;
+    if (host) {
+      customRedirect = `${proto}://${host}/auth/recruitment/google/callback`;
+      if (host.includes('ai.jecrcuniversity.edu.in')) {
+        customRedirect = 'https://ai.jecrcuniversity.edu.in/directorbot/auth/recruitment/google/callback';
+      }
+    }
+
+    const result = await handleRecruitmentOAuthCallback(code, customRedirect);
+    res.redirect(`${subpath || ''}/recruitment/?auth=success&email=${encodeURIComponent(result.email)}`);
+  } catch (err) {
+    res.redirect(`${subpath || ''}/recruitment/?auth=error&msg=${encodeURIComponent(err.message)}`);
   }
 });
 
@@ -270,6 +342,22 @@ app.use('/api', async (req, res, next) => {
 
   req.user = user;
   req.authToken = token;
+
+  // Strict role isolation: Recruiters are forbidden from Director Bot routes
+  const isRecruiter = user.role === 'recruiter_admin' || user.role === 'recruiter';
+  if (isRecruiter) {
+    const isAllowedForRecruiter = 
+      req.path.startsWith('/recruitment') ||
+      req.path.startsWith('/auth/me') ||
+      req.path.startsWith('/auth/profile') ||
+      req.path.startsWith('/auth/change-password') ||
+      req.path.startsWith('/auth/logout');
+
+    if (!isAllowedForRecruiter) {
+      return res.status(403).json({ success: false, error: 'Access denied: Executive Director clearance required.' });
+    }
+  }
+
   next();
 });
 
@@ -286,6 +374,233 @@ app.post('/api/auth/change-password', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
     const result = await changeUserPassword(req.user.id, currentPassword, newPassword);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Update Profile (Change Email & Name)
+app.post('/api/auth/profile', async (req, res) => {
+  try {
+    const { email, name } = req.body;
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    const result = await updateUserProfile(req.user.id, email, name);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// --- Recruitment & Hiring Automation APIs ---
+// ==========================================
+
+// Get Recruitment Mailbox & Stats Status
+app.get('/api/recruitment/status', async (req, res) => {
+  try {
+    const status = await getRecruitmentStatus();
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// List Candidate Applications with Search & Filter
+app.get('/api/recruitment/applications', async (req, res) => {
+  try {
+    const search = req.query.search ? `%${req.query.search.trim()}%` : null;
+    const status = req.query.status ? req.query.status.trim() : null;
+
+    let sql = 'SELECT * FROM candidate_applications WHERE 1=1';
+    const params = [];
+
+    if (search) {
+      sql += ' AND (candidate_name LIKE ? OR candidate_email LIKE ? OR applied_post LIKE ? OR application_id LIKE ?)';
+      params.push(search, search, search, search);
+    }
+
+    if (status && status !== 'ALL') {
+      sql += ' AND confirmation_status = ?';
+      params.push(status);
+    }
+
+    sql += ' ORDER BY created_at DESC LIMIT 300';
+    const rows = await query(sql, params);
+
+    res.json({ success: true, applications: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Trigger Instant Inbox Scan
+app.post('/api/recruitment/scan-now', async (req, res) => {
+  try {
+    const result = await scanRecruitmentInbox();
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Send / Resend Confirmation Email
+app.post('/api/recruitment/send-confirmation/:id', async (req, res) => {
+  try {
+    const rows = await query('SELECT * FROM candidate_applications WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Application record not found' });
+    }
+
+    const appRecord = rows[0];
+    const dispatchResult = await sendConfirmationEmail({
+      candidateEmail: appRecord.candidate_email,
+      candidateName: appRecord.candidate_name,
+      appliedPost: appRecord.applied_post,
+      applicationId: appRecord.application_id
+    });
+
+    await query(
+      `UPDATE candidate_applications SET
+        confirmation_status = 'SENT',
+        confirmation_method = ?,
+        confirmation_sent_at = NOW(),
+        confirmation_error = NULL
+       WHERE id = ?`,
+      [dispatchResult.method, req.params.id]
+    );
+
+    res.json({ success: true, message: `Confirmation sent successfully via ${dispatchResult.method}` });
+  } catch (err) {
+    await query('UPDATE candidate_applications SET confirmation_error = ? WHERE id = ?', [err.message, req.params.id]);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get Recruitment & SMTP Settings
+app.get('/api/recruitment/settings', async (req, res) => {
+  try {
+    const settings = await getAllRecruitmentSettings();
+    const masked = {
+      ...settings,
+      smtp_pass: settings.smtp_pass ? '••••••••' : ''
+    };
+    res.json({ success: true, settings: masked });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Save Recruitment & SMTP Settings
+app.post('/api/recruitment/settings', async (req, res) => {
+  try {
+    const {
+      dispatch_method,
+      smtp_host,
+      smtp_port,
+      smtp_secure,
+      smtp_user,
+      smtp_pass,
+      smtp_from_name,
+      smtp_from_email,
+      auto_reply_enabled,
+      email_subject_template,
+      email_body_template
+    } = req.body;
+
+    if (dispatch_method !== undefined) await setRecruitmentSetting('dispatch_method', dispatch_method);
+    if (smtp_host !== undefined) await setRecruitmentSetting('smtp_host', smtp_host);
+    if (smtp_port !== undefined) await setRecruitmentSetting('smtp_port', String(smtp_port));
+    if (smtp_secure !== undefined) await setRecruitmentSetting('smtp_secure', String(smtp_secure));
+    if (smtp_user !== undefined) await setRecruitmentSetting('smtp_user', smtp_user);
+    if (smtp_pass !== undefined && smtp_pass !== '••••••••' && smtp_pass.trim() !== '') {
+      await setRecruitmentSetting('smtp_pass', smtp_pass);
+    }
+    if (smtp_from_name !== undefined) await setRecruitmentSetting('smtp_from_name', smtp_from_name);
+    if (smtp_from_email !== undefined) await setRecruitmentSetting('smtp_from_email', smtp_from_email);
+    if (auto_reply_enabled !== undefined) await setRecruitmentSetting('auto_reply_enabled', String(auto_reply_enabled));
+    if (email_subject_template !== undefined) await setRecruitmentSetting('email_subject_template', email_subject_template);
+    if (email_body_template !== undefined) await setRecruitmentSetting('email_body_template', email_body_template);
+
+    await logActivity('RECRUITMENT', `Recruitment settings updated by ${req.user.email}`, 'INFO');
+    res.json({ success: true, message: 'Recruitment settings saved successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Test SMTP Connection
+app.post('/api/recruitment/test-smtp', async (req, res) => {
+  try {
+    const { host, port, secure, user, pass, fromEmail, fromName, testRecipient } = req.body;
+    let actualPass = pass;
+    if (pass === '••••••••' || !pass) {
+      actualPass = await getRecruitmentSetting('smtp_pass');
+    }
+
+    const result = await testSmtpConnection({
+      host,
+      port,
+      secure,
+      user,
+      pass: actualPass,
+      fromEmail,
+      fromName,
+      testRecipient
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Disconnect Hiring Gmail
+app.post('/api/recruitment/disconnect-gmail', async (req, res) => {
+  try {
+    await disconnectRecruitmentGmail();
+    res.json({ success: true, message: 'Hiring Gmail inbox disconnected successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Team Member Management
+app.get('/api/recruitment/team', async (req, res) => {
+  try {
+    const members = await getTeamMembers();
+    res.json({ success: true, members });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/recruitment/team', async (req, res) => {
+  try {
+    const result = await addTeamMember(req.user, req.body);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/recruitment/team/:id', async (req, res) => {
+  try {
+    const result = await deleteTeamMember(req.params.id, req.user);
     if (!result.success) {
       return res.status(400).json(result);
     }
@@ -833,10 +1148,18 @@ async function bootstrap() {
   startDirectorSession().catch(err => console.error('[Director WA Error]:', err.message));
   startBotSession().catch(err => console.error('[Bot WA Error]:', err.message));
 
-  // 3. Start Web Server
+  // 3. Start Recruitment Resume Email Poller Engine
+  try {
+    startRecruitmentPollingEngine();
+  } catch (err) {
+    console.error('[Recruitment Engine Error]:', err.message);
+  }
+
+  // 4. Start Web Server
   server.listen(PORT, () => {
     console.log(`[Server] Executive Dashboard is live at: http://localhost:${PORT}`);
     console.log(`[Server] Google OAuth Redirect URI: http://localhost:${PORT}/auth/google/callback`);
+    console.log(`[Server] Recruitment Hub is live at: http://localhost:${PORT}/recruitment/`);
   });
 }
 

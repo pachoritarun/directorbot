@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JECRC University | Recruitment & Talent Acquisition Automation Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/recruitment.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>JECRC Talent Hub</h1>
+          <span>Recruitment Automation</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a class="nav-link active" data-tab="tab-applications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          Candidate Applications
+        </a>
+
+        <a class="nav-link" data-tab="tab-dispatch">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+            <polyline points="22,6 12,13 2,6"></polyline>
+          </svg>
+          Dispatch & SMTP Engine
+        </a>
+
+        <a class="nav-link" data-tab="tab-team" id="nav-team-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          Recruiter Team
+        </a>
+
+        <a class="nav-link" data-tab="tab-profile">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          My Profile & Security
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-profile-badge">
+          <div class="user-avatar" id="sidebar-user-avatar">DT</div>
+          <div class="user-meta">
+            <div class="name" id="sidebar-user-name">Deepak Talkudar</div>
+            <div class="role" id="sidebar-user-role">Recruiter Admin</div>
+          </div>
+        </div>
+        <button class="btn-sidebar-logout" id="btn-sidebar-logout" onclick="executeLogout(event)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          Logout
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Wrapper -->
+    <div class="main-wrapper">
+      
+      <!-- Top Header -->
+      <header class="top-header">
+        <div class="header-status-group">
+          <!-- Gmail Connection Status Chip -->
+          <div class="status-chip" id="chip-hiring-gmail">
+            <span class="dot"></span>
+            <span id="chip-gmail-text">Checking Mailbox...</span>
+          </div>
+
+          <!-- Dispatch Channel Status Chip -->
+          <div class="status-chip" id="chip-dispatch-method">
+            <span id="chip-dispatch-text">Method: Gmail OAuth</span>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button class="btn-scan-now" id="btn-scan-now" onclick="triggerInboxScan()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            <span>Scan Inbox Now</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <main class="content-area">
+
+        <!-- ============================================== -->
+        <!-- TAB 1: CANDIDATE APPLICATIONS & MONITORING LOG -->
+        <!-- ============================================== -->
+        <section id="tab-applications" class="tab-content active">
+          <!-- Stat Cards Grid -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-info">
+                <div class="stat-label">Total Applications</div>
+                <div class="stat-value" id="stat-total-apps">0</div>
+              </div>
+              <div class="stat-icon-bubble">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+              </div>
+            </div>
+
+            <div class="stat-card emerald">
+              <div class="stat-info">
+                <div class="stat-label">Confirmations Dispatched</div>
+                <div class="stat-value" id="stat-sent-apps">0</div>
+              </div>
+              <div class="stat-icon-bubble">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+              </div>
+            </div>
+
+            <div class="stat-card amber">
+              <div class="stat-info">
+                <div class="stat-label">Pending / Processing</div>
+                <div class="stat-value" id="stat-pending-apps">0</div>
+              </div>
+              <div class="stat-icon-bubble">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+              </div>
+            </div>
+
+            <div class="stat-card cyan">
+              <div class="stat-info">
+                <div class="stat-label">Active Channel</div>
+                <div class="stat-value" style="font-size: 1.3rem; text-transform: uppercase;" id="stat-channel-name">GMAIL</div>
+              </div>
+              <div class="stat-icon-bubble">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Applications Feed Table Panel -->
+          <div class="glass-panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                Resume & CV Applications Tracker
+              </div>
+
+              <div class="table-controls">
+                <div class="search-box">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input type="text" id="input-app-search" class="search-input" placeholder="Search candidate, role, ref ID..." oninput="debounceSearch()">
+                </div>
+
+                <select id="select-status-filter" class="select-filter" onchange="loadApplications()">
+                  <option value="ALL">All Statuses</option>
+                  <option value="SENT">Confirmed (Sent)</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="FAILED">Failed</option>
+                </select>
+
+                <button class="btn-secondary" onclick="loadApplications()" title="Refresh Feed">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Table -->
+            <div class="table-responsive">
+              <table class="custom-table" id="table-applications">
+                <thead>
+                  <tr>
+                    <th>Ref ID</th>
+                    <th>Candidate</th>
+                    <th>Post / Role</th>
+                    <th>Attachments</th>
+                    <th>Gemini AI Summary & Skills</th>
+                    <th>Confirmation Dispatch</th>
+                    <th>Received At</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-applications">
+                  <tr>
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 36px;">
+                      Loading applications...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- TAB 2: DISPATCH & DYNAMIC SMTP SETTINGS        -->
+        <!-- ============================================== -->
+        <section id="tab-dispatch" class="tab-content">
+          <div class="glass-panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                Confirmation Email Dispatch Method
+              </div>
+            </div>
+
+            <p style="color: var(--text-sub); font-size: 0.88rem; margin-bottom: 20px;">
+              Choose whether candidate confirmation emails are sent directly through the connected Google Gmail account or routed dynamically via your custom SMTP server.
+            </p>
+
+            <!-- Dispatch Choice Cards -->
+            <div class="dispatch-cards-grid">
+              <div class="dispatch-option-card selected" id="card-choice-gmail" onclick="selectDispatchMethod('gmail')">
+                <div class="card-radio-header">
+                  <div class="card-radio-title">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                      <polyline points="22,6 12,13 2,6"></polyline>
+                    </svg>
+                    Google Gmail OAuth
+                  </div>
+                  <div class="custom-radio"></div>
+                </div>
+                <div class="card-desc">
+                  Dispatches instant confirmation emails directly from the authenticated university hiring mailbox via Google Gmail API.
+                </div>
+              </div>
+
+              <div class="dispatch-option-card" id="card-choice-smtp" onclick="selectDispatchMethod('smtp')">
+                <div class="card-radio-header">
+                  <div class="card-radio-title">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-amber)" stroke-width="2">
+                      <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                      <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                      <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                      <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                    </svg>
+                    Dynamic Custom SMTP
+                  </div>
+                  <div class="custom-radio"></div>
+                </div>
+                <div class="card-desc">
+                  Reads incoming resumes via Gmail, but sends confirmations through a different institutional SMTP server of your choice.
+                </div>
+              </div>
+            </div>
+
+            <!-- Hiring Gmail Connection Status -->
+            <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+              <div>
+                <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 2px;">Connected Hiring Google Mailbox</div>
+                <div style="font-size: 0.82rem; color: var(--text-sub);" id="text-gmail-connection-desc">
+                  Checking connection...
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 10px;">
+                <button class="btn-primary" id="btn-connect-gmail" onclick="connectHiringGmail()">
+                  Connect Google Mailbox
+                </button>
+                <button class="btn-danger" id="btn-disconnect-gmail" style="display: none;" onclick="disconnectHiringGmail()">
+                  Disconnect
+                </button>
+              </div>
+            </div>
+
+            <!-- Dynamic SMTP Configuration Form -->
+            <div id="smtp-settings-block">
+              <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; color: var(--accent-amber);">
+                Custom SMTP Server Credentials
+              </h3>
+              
+              <div class="form-grid">
+                <div class="form-group">
+                  <label class="form-label">SMTP Host / Server</label>
+                  <input type="text" id="smtp_host" class="form-control" placeholder="e.g. smtp.gmail.com or mail.jecrcu.edu.in">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">SMTP Port</label>
+                  <input type="number" id="smtp_port" class="form-control" placeholder="587 or 465">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">SSL / TLS Encryption</label>
+                  <select id="smtp_secure" class="form-control">
+                    <option value="false">STARTTLS / Port 587 (Recommended)</option>
+                    <option value="true">SSL/TLS Direct / Port 465</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">SMTP Username / Email</label>
+                  <input type="text" id="smtp_user" class="form-control" placeholder="e.g. hr@jecrcu.edu.in">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">SMTP Passcode / App Password</label>
+                  <input type="password" id="smtp_pass" class="form-control" placeholder="••••••••">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Sender Display Name</label>
+                  <input type="text" id="smtp_from_name" class="form-control" placeholder="JECRC University Recruitment Office">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Sender From Email (Optional)</label>
+                  <input type="email" id="smtp_from_email" class="form-control" placeholder="leave blank to use SMTP user">
+                </div>
+              </div>
+
+              <!-- Test SMTP Connection Card -->
+              <div style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px; margin-bottom: 24px;">
+                <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 8px;">Test SMTP Server Connection</div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                  <input type="email" id="smtp_test_recipient" class="form-control" style="flex: 1; min-width: 250px;" placeholder="Enter your email to receive a live test ping...">
+                  <button class="btn-secondary" id="btn-test-smtp" onclick="runSmtpTest()">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="22" y1="2" x2="11" y2="13"></line>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                    Verify & Send Ping
+                  </button>
+                </div>
+                <div id="smtp-test-result" style="margin-top: 10px; font-size: 0.84rem; display: none;"></div>
+              </div>
+            </div>
+
+            <!-- Auto-Responder & Dynamic Confirmation Template -->
+            <h3 style="font-size: 1.05rem; font-weight: 700; margin-top: 32px; margin-bottom: 16px; color: var(--accent-purple);">
+              Automated Confirmation Email Template
+            </h3>
+
+            <div class="form-group" style="margin-bottom: 18px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="auto_reply_enabled" style="width: 18px; height: 18px; accent-color: var(--accent-purple);">
+                <span style="font-weight: 600; font-size: 0.92rem;">Automatically send instant confirmation email when a new resume/CV arrives</span>
+              </label>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label">Subject Line</label>
+              <input type="text" id="email_subject_template" class="form-control" placeholder="Application Received: {applied_post} at JECRC University (Ref: {application_id})" oninput="updateLivePreview()">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label">Email Body Content</label>
+              <textarea id="email_body_template" class="form-control" style="min-height: 180px;" oninput="updateLivePreview()"></textarea>
+              
+              <div class="chips-container">
+                <span style="font-size: 0.76rem; color: var(--text-muted); margin-right: 4px;">Click to insert dynamic tag:</span>
+                <span class="var-chip" onclick="insertTag('{candidate_name}')">{candidate_name}</span>
+                <span class="var-chip" onclick="insertTag('{applied_post}')">{applied_post}</span>
+                <span class="var-chip" onclick="insertTag('{application_id}')">{application_id}</span>
+                <span class="var-chip" onclick="insertTag('{received_date}')">{received_date}</span>
+                <span class="var-chip" onclick="insertTag('{university_name}')">{university_name}</span>
+              </div>
+            </div>
+
+            <!-- Live Preview -->
+            <div class="preview-box">
+              <div class="preview-title">Live Candidate Email Preview</div>
+              <div class="preview-subject" id="preview-subject">Application Received: Assistant Professor - CSE at JECRC University (Ref: JECRC-HR-98214)</div>
+              <div class="preview-body" id="preview-body"></div>
+            </div>
+
+            <div style="margin-top: 24px;">
+              <button class="btn-primary" onclick="saveRecruitmentSettings()">
+                Save Dispatch Settings
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- TAB 3: RECRUITER TEAM MANAGEMENT               -->
+        <!-- ============================================== -->
+        <section id="tab-team" class="tab-content">
+          <div class="glass-panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="9" cy="7" r="4"></circle>
+                </svg>
+                Recruitment Team Members
+              </div>
+
+              <button class="btn-primary" onclick="openAddMemberModal()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add Recruiter Member
+              </button>
+            </div>
+
+            <p style="color: var(--text-sub); font-size: 0.88rem; margin-bottom: 20px;">
+              Authorized members added here can log in to manage applications and dispatch emails. Their access is strictly separated from the Director Bot.
+            </p>
+
+            <div class="table-responsive">
+              <table class="custom-table" id="table-team">
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Email Address</th>
+                    <th>Role</th>
+                    <th>Account Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-team">
+                  <tr>
+                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                      Loading team members...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- TAB 4: MY PROFILE & SECURITY                   -->
+        <!-- ============================================== -->
+        <section id="tab-profile" class="tab-content">
+          <div class="glass-panel" style="max-width: 600px;">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                Update Profile Information
+              </div>
+            </div>
+
+            <form id="form-update-profile" onsubmit="handleUpdateProfile(event)">
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label class="form-label">Full Name</label>
+                <input type="text" id="profile_name" class="form-control" placeholder="Deepak Talkudar" required>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 20px;">
+                <label class="form-label">Official Login Email</label>
+                <input type="email" id="profile_email" class="form-control" placeholder="deepak.talkudar@jecrcu.edu.in" required>
+              </div>
+
+              <button type="submit" class="btn-primary">
+                Save Profile Changes
+              </button>
+            </form>
+          </div>
+
+          <!-- Change Passcode Card -->
+          <div class="glass-panel" style="max-width: 600px; margin-top: 24px;">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                Change Security Passcode
+              </div>
+            </div>
+
+            <form id="form-change-password" onsubmit="handleChangePassword(event)">
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label class="form-label">Current Passcode</label>
+                <input type="password" id="pwd_current" class="form-control" placeholder="••••••••" required>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label class="form-label">New Passcode</label>
+                <input type="password" id="pwd_new" class="form-control" placeholder="Minimum 6 characters" minlength="6" required>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 20px;">
+                <label class="form-label">Confirm New Passcode</label>
+                <input type="password" id="pwd_confirm" class="form-control" placeholder="Re-enter new passcode" minlength="6" required>
+              </div>
+
+              <button type="submit" class="btn-primary">
+                Update Passcode
+              </button>
+            </form>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Add Member Modal -->
+  <div class="modal-overlay" id="modal-add-member">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Add Recruiter Team Member</div>
+        <button class="modal-close" onclick="closeAddMemberModal()">&times;</button>
+      </div>
+
+      <form id="form-add-member" onsubmit="handleAddMember(event)">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label">Full Name</label>
+          <input type="text" id="new_member_name" class="form-control" placeholder="e.g. Priya Sharma" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label">Email Address (Login ID)</label>
+          <input type="email" id="new_member_email" class="form-control" placeholder="e.g. priya.sharma@jecrcu.edu.in" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 24px;">
+          <label class="form-label">Temporary Passcode</label>
+          <input type="password" id="new_member_pass" class="form-control" placeholder="At least 6 characters" minlength="6" required>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" class="btn-secondary" onclick="closeAddMemberModal()">Cancel</button>
+          <button type="submit" class="btn-primary">Create Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="js/recruitment.js"></script>
+</body>
+</html>
