@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import nodemailer from 'nodemailer';
-import { query, getRecruitmentSetting, setRecruitmentSetting, getAllRecruitmentSettings, logActivity } from '../database/db.js';
+import { query, getSetting, getRecruitmentSetting, setRecruitmentSetting, getAllRecruitmentSettings, logActivity } from '../database/db.js';
 import { getGeminiClient, callGeminiWithFallback } from './geminiService.js';
 import dotenv from 'dotenv';
 dotenv.config();
