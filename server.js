@@ -459,6 +459,27 @@ app.get('/api/recruitment/applications', async (req, res) => {
   }
 });
 
+// Clear All Candidate Applications History
+app.delete('/api/recruitment/applications', async (req, res) => {
+  try {
+    await query('DELETE FROM candidate_applications');
+    await logActivity('RECRUITMENT', `All candidate application history cleared by ${req.user.email}`, 'WARN');
+    res.json({ success: true, message: 'All application history cleared successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Delete Single Application Record
+app.delete('/api/recruitment/applications/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM candidate_applications WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Application record deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Trigger Instant Inbox Scan
 app.post('/api/recruitment/scan-now', async (req, res) => {
   try {

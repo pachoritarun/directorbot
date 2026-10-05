@@ -285,9 +285,14 @@ async function loadApplications() {
             <td>${statusBadge}</td>
             <td style="font-size: 0.78rem; color: var(--text-muted); white-space: nowrap;">${dateStr}</td>
             <td>
-              <button class="btn-resend" onclick="sendConfirmation('${app.id}')" title="Send or resend confirmation email">
-                ${app.confirmation_status === 'SENT' ? 'Resend' : 'Send'}
-              </button>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <button class="btn-resend" onclick="sendConfirmation('${app.id}')" title="Send or resend confirmation email">
+                  ${app.confirmation_status === 'SENT' ? 'Resend' : 'Send'}
+                </button>
+                <button class="btn-danger" style="padding: 4px 8px; font-size: 0.72rem;" onclick="deleteSingleApplication('${app.id}')" title="Delete application record">
+                  ✕
+                </button>
+              </div>
             </td>
           </tr>
         `;
@@ -298,6 +303,48 @@ async function loadApplications() {
     }).join('');
   } catch (err) {
     console.error('Failed to load applications:', err);
+  }
+}
+
+// Clear Entire Application History
+async function clearApplicationHistory() {
+  if (!confirm('⚠️ Are you sure you want to permanently clear all candidate application history? This action cannot be undone.')) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/recruitment/applications', { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('✓ All candidate application history cleared.', 'success');
+      await loadApplications();
+      await loadStatus();
+    } else {
+      showToast('❌ ' + (data.error || 'Failed to clear history.'), 'error');
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+// Delete a Single Application Record
+async function deleteSingleApplication(appId) {
+  if (!confirm('Delete this candidate application record?')) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/recruitment/applications/${appId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Application record deleted.', 'success');
+      await loadApplications();
+      await loadStatus();
+    } else {
+      showToast('❌ ' + (data.error || 'Failed to delete record.'), 'error');
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
   }
 }
 
