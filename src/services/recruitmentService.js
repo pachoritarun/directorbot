@@ -454,11 +454,11 @@ export async function scanRecruitmentInbox() {
   let processedCount = 0;
 
   try {
-    // Search unread messages
+    // Search recent unread messages or messages from past 2 days
     const listRes = await gmail.users.messages.list({
       userId: 'me',
-      q: 'is:unread',
-      maxResults: 25
+      q: 'is:unread OR newer_than:2d',
+      maxResults: 35
     });
 
     const messages = listRes.data.messages || [];
@@ -643,22 +643,22 @@ export async function scanRecruitmentInbox() {
 }
 
 /**
- * Start periodic inbox polling engine (every 2.5 minutes)
+ * Start periodic inbox polling engine (every 60 seconds)
  */
 export function startRecruitmentPollingEngine() {
   if (pollingIntervalHandle) {
     clearInterval(pollingIntervalHandle);
   }
 
-  // Initial trigger after 15s
+  // Initial trigger after 10s
   setTimeout(() => {
     scanRecruitmentInbox().catch(err => console.warn('[Recruitment Poller Initial]', err.message));
-  }, 15000);
+  }, 10000);
 
-  // Poll every 150 seconds (2.5 minutes)
+  // Poll every 60 seconds (1 minute) for instant auto-detection of incoming emails
   pollingIntervalHandle = setInterval(() => {
     scanRecruitmentInbox().catch(err => console.warn('[Recruitment Poller Interval]', err.message));
-  }, 150000);
+  }, 60000);
 
-  console.log('[Recruitment] Automated resume email scanner initialized (interval: 150s)');
+  console.log('[Recruitment] Automated resume email scanner initialized (interval: 60s)');
 }
