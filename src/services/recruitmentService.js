@@ -615,17 +615,17 @@ export async function scanRecruitmentInbox() {
         }
       }
 
-      // Mark email as read in Gmail
+      // Keep the incoming email UNREAD on Gmail so recruiters see it unread in their mailbox
       try {
         await gmail.users.messages.modify({
           userId: 'me',
           id: msg.id,
           requestBody: {
-            removeLabelIds: ['UNREAD']
+            addLabelIds: ['UNREAD']
           }
         });
-      } catch (markErr) {
-        console.warn(`[Recruitment] Failed to remove UNREAD label on message ${msg.id}:`, markErr.message);
+      } catch (labelErr) {
+        // If already unread or error, safely ignore
       }
     }
 
